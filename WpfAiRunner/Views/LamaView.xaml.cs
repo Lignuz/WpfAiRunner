@@ -116,6 +116,10 @@ public partial class LamaView : UserControl, IDisposable
         {
             SetBusy(false, null);
             UpdateButtons();
+
+            // 로딩하며 생긴 임시 쓰레기 청소
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
     }
 
@@ -178,6 +182,10 @@ public partial class LamaView : UserControl, IDisposable
         finally
         {
             SetBusy(false, null);
+
+            // 이미지 변환하며 생긴 큰 쓰레기들 청소
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         UpdateButtons();

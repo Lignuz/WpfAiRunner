@@ -14,7 +14,7 @@ public class LamaInpainter : IDisposable
 
     public LamaInpainter(string modelPath, bool useGpu = false)
     {
-        var so = new SessionOptions
+        using var so = new SessionOptions
         {
             // 1. 기본 설정 (CPU 기준)
             // NOTE: ORT_ENABLE_BASIC is conservative and tends to be stable across many models.
