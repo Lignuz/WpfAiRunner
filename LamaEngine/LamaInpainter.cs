@@ -10,17 +10,79 @@ public class LamaInpainter : IDisposable
 {
     private readonly InferenceSession _session;
     private const int ModelSize = 512;
+    public string DeviceMode { get; private set; } = "CPU";
 
-    public LamaInpainter(string modelPath)
+    public LamaInpainter(string modelPath, bool useGpu = false)
     {
         var so = new SessionOptions
         {
+            // 1. 기본 설정 (CPU 기준)
             // NOTE: ORT_ENABLE_BASIC is conservative and tends to be stable across many models.
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
             IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount - 1),
             InterOpNumThreads = 1
         };
+
+        if (useGpu)
+        {
+            // 2. GPU 가속 시도 
+            try
+            {
+                // CUDA(0번 GPU) 사용을 시도합니다.
+                // 주의: GPU 패키지가 설치되어 있고, 드라이버가 깔려 있어야 성공합니다.
+                so.AppendExecutionProvider_CUDA(0);
+                DeviceMode = "GPU (CUDA)";
+            }
+            catch (Exception)
+            {
+                // 3. 실패 시 조용히 넘어감 (Fallback)
+                // 여기에 도달했다는 것은:
+                // - NVIDIA 그래픽카드가 없거나
+                // - CUDA 드라이버가 설치되지 않았거나
+                // - 호환되지 않는 GPU임
+                // => 이 경우 SessionOptions는 기본값(CPU) 상태를 유지합니다.
+                System.Diagnostics.Debug.WriteLine("GPU Acceleration failed. Switching to CPU.");
+                DeviceMode = "CPU (Fallback)";
+            }
+        }
+        else
+        {
+            DeviceMode = "CPU";
+        }
+
+        // 4. 세션 생성 (GPU가 성공했으면 GPU로, 실패했으면 CPU로 로드됨)
         _session = new InferenceSession(modelPath, so);
+
+        if (DeviceMode.Contains("GPU"))
+        {
+            RunWarmup();
+        }
+    }
+
+    private void RunWarmup()
+    {
+        try
+        {
+            // 1. 가짜 데이터 생성 (512x512, 0으로 채움)
+            // ImageSharp를 쓰지 않고 텐서를 직접 만들어서 빠르게 처리
+            var dummyImage = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+            var dummyMask = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
+
+            var inputs = new List<NamedOnnxValue>
+        {
+            NamedOnnxValue.CreateFromTensor("image", dummyImage),
+            NamedOnnxValue.CreateFromTensor("mask", dummyMask)
+        };
+
+            // 2. 추론 실행 (결과는 버림)
+            // 이 과정에서 GPU 초기화, 메모리 할당, 커널 컴파일이 모두 완료됨
+            using var results = _session.Run(inputs);
+        }
+        catch (Exception ex)
+        {
+            // 웜업 실패는 무시해도 됨 (실제 실행 때 다시 시도할 테니)
+            System.Diagnostics.Debug.WriteLine($"Warmup failed: {ex.Message}");
+        }
     }
 
     public byte[] ProcessImage(byte[] imageBytes, byte[] maskBytes)

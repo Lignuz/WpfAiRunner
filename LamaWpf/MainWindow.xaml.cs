@@ -13,6 +13,7 @@ public partial class MainWindow : Window
 {
     private LamaInpainter? _inpainter;
     private BitmapSource? _inputBitmap;
+    private string? _modelPath;
 
     // mask buffer (Gray8, 0=none, 255=masked)
     private byte[]? _maskGray8;
@@ -58,6 +59,15 @@ public partial class MainWindow : Window
         SetStatus("Ready.");
     }
 
+    private async void ChkUseGpu_Click(object sender, RoutedEventArgs e)
+    {
+        // 모델이 불려진 상태에서만 동작
+        if (!string.IsNullOrEmpty(_modelPath))
+        {
+            await ReloadModelAsync(_modelPath);
+        }
+    }
+
     private async void BtnPickModel_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog
@@ -67,18 +77,44 @@ public partial class MainWindow : Window
 
         if (dlg.ShowDialog(this) != true) return;
 
+        // 선택한 경로로 로딩 시작
+        await ReloadModelAsync(dlg.FileName);
+    }
+
+    private async Task ReloadModelAsync(string path)
+    {
+        // UI 준비
         SetBusy(true, "Loading model...");
+
+        // UI 스레드 갱신을 위해 잠시 대기
+        await Task.Delay(10);
 
         try
         {
-            // Heavy init can stutter UI -> run on worker thread.
+            // 체크박스 상태 확인
+            bool useGpu = ChkUseGpu.IsChecked == true;
+
+            // 기존 인스턴스 정리
             _inpainter?.Dispose();
-            var path = dlg.FileName;
+            _inpainter = null;
 
-            _inpainter = await Task.Run(() => new LamaInpainter(path));
+            // 백그라운드에서 생성 (LamaInpainter 생성자에 useGpu 전달)
+            _inpainter = await Task.Run(() => new LamaInpainter(path, useGpu));
 
-            TxtModel.Text = System.IO.Path.GetFileName(path);
-            SetStatus("Model loaded.");
+            // 경로 저장 및 UI 업데이트
+            _modelPath = path;
+            TxtModel.Text = System.IO.Path.GetFileName(_modelPath);
+
+            // 현재 모드 표시 (GPU 성공 여부 확인)
+            SetStatus($"Model loaded on {_inpainter.DeviceMode}.");
+
+            // 만약 GPU를 체크했는데 실패해서 CPU로 떴다면, 체크박스도 끄는 센스
+            if (useGpu && _inpainter.DeviceMode.Contains("CPU"))
+            {
+                // 사용자가 "어? 왜 안 켜져?" 하고 알 수 있게
+                ChkUseGpu.IsChecked = false;
+                MessageBox.Show("GPU init failed. Fallback to CPU.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         catch (Exception ex)
         {
@@ -90,9 +126,8 @@ public partial class MainWindow : Window
         finally
         {
             SetBusy(false, null);
+            UpdateButtons();
         }
-
-        UpdateButtons();
     }
 
     private void BtnOpenImage_Click(object sender, RoutedEventArgs e)
@@ -596,6 +631,8 @@ public partial class MainWindow : Window
         if (status != null) SetStatus(status);
 
         PbarLoading.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+
+        ChkUseGpu.IsEnabled = !busy;
 
         BtnPickModel.IsEnabled = !busy;
         BtnOpenImage.IsEnabled = !busy;

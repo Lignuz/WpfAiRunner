@@ -50,6 +50,8 @@
 
                     <Separator Width="18" Opacity="0"/>
 
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Foreground="#DADADA" VerticalAlignment="Center" Margin="0,0,14,0" ToolTip="Check to use CUDA acceleration (requires NVIDIA GPU)" Click="ChkUseGpu_Click"/>
+
                     <Button x:Name="BtnOpenImage" Content="Open Image..." Width="120" Click="BtnOpenImage_Click"/>
                     <Button x:Name="BtnRun" Content="Run" Width="86" Click="BtnRun_Click" IsEnabled="False"/>
                     <Button x:Name="BtnClearMask" Content="Clear Mask" Width="104" Margin="0,0,10,0" Click="BtnClearMask_Click" IsEnabled="False"/>
@@ -69,7 +71,7 @@
                     </Border>
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,10,0">
                     <ProgressBar x:Name="PbarLoading" Width="160" Height="10"
                                  IsIndeterminate="True" Visibility="Collapsed" Margin="0,0,12,0"/>
                     <TextBlock x:Name="TxtStatus" Foreground="#9CDCFE" VerticalAlignment="Center" Text="Ready."/>
