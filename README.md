@@ -51,6 +51,8 @@ This project uses third-party open-source software and pretrained models.
 - **Original Paper**: [Resolution-robust Large Mask Inpainting with Fourier Convolutions](https://arxiv.org/abs/2109.07161) (WACV 2022)
 - **Official Repository**: [advimman/lama](https://github.com/advimman/lama) (Apache 2.0)
 - **Model Source**: [LaMa-ONNX via HuggingFace](https://huggingface.co/Carve/LaMa-ONNX)
+  - **Important**: You **MUST** use the `lama_fp32.onnx` file.
+  - *Reason: This application currently implements FP32 tensor processing. Using FP16 or quantized models (`lama.onnx`) will cause a crash due to input type mismatch.*
 
 ### Disclaimer
 This project is an independent implementation for testing and educational purposes.
