@@ -20,7 +20,7 @@
                  IsIndeterminate="True" 
                  Visibility="Collapsed" 
                  VerticalAlignment="Center"/>
-            <TextBlock x:Name="TxtStatus" Foreground="#9CDCFE" VerticalAlignment="Center" Margin="16,0,0,0"/>
+            <TextBlock x:Name="TxtStatus" Foreground="#9CDCFE" VerticalAlignment="Center" Margin="16,0,0,0" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" MaxWidth="600"/>
         </DockPanel>
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>

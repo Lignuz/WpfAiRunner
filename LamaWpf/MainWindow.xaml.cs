@@ -13,7 +13,6 @@ public partial class MainWindow : Window
 {
     private LamaInpainter? _inpainter;
     private string? _modelPath;
-    private string? _imagePath;
     private BitmapSource? _inputBitmap;
 
     private Point _dragStart;
@@ -21,70 +20,101 @@ public partial class MainWindow : Window
     private System.Windows.Shapes.Rectangle? _rectVisual;
     private Int32Rect? _selectedRectPx;
 
+    private bool _busy;
+
     public MainWindow()
     {
         InitializeComponent();
-        _modelPath = null;
+
         TxtModel.Text = "(no model)";
+        SetStatus("Ready.");
+
+        UpdateRunEnabled();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _inpainter?.Dispose();
+        _inpainter = null;
+        base.OnClosed(e);
+    }
+
+    private void SetStatus(string message)
+    {
+        // 너무 길면 UI가 보기 싫어서 컷 
+        if (message.Length > 300) message = message[..300] + "…";
+        TxtStatus.Text = message;
+    }
+
+    private void SetBusy(bool busy, string? status = null)
+    {
+        _busy = busy;
+
+        if (status != null) SetStatus(status);
+
+        PbarLoading.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
+
+        // 작업 중에는 전부 비활성화
+        BtnPickModel.IsEnabled = !busy;
+        BtnOpenImage.IsEnabled = !busy;
+        BtnRun.IsEnabled = false; // 아래 UpdateRunEnabled에서 idle일 때만 다시 켜짐
+        Overlay.IsEnabled = !busy;
+
+        Mouse.OverrideCursor = busy ? Cursors.Wait : null;
+
         UpdateRunEnabled();
     }
 
     private async void BtnPickModel_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
+
         var dlg = new OpenFileDialog
         {
-            Title = "Select ONNX Model",
-            Filter = "ONNX model (*.onnx)|*.onnx|All files (*.*)|*.*"
+            Title = "Select LaMa ONNX model",
+            Filter = "ONNX model|*.onnx|All files (*.*)|*.*"
         };
-
         if (dlg.ShowDialog() != true) return;
 
         string selectedPath = dlg.FileName;
+        if (!File.Exists(selectedPath))
+        {
+            MessageBox.Show("Model file not found.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
 
-        // 1. UI를 '로딩 중' 상태로 변경
-        TxtStatus.Text = "Loading model... Please wait.";
-        PbarLoading.Visibility = Visibility.Visible; // 프로그래스바 표시
-        BtnPickModel.IsEnabled = false; // 중복 클릭 방지
-        Mouse.OverrideCursor = Cursors.Wait; // 마우스 커서를 모래시계로
+        SetBusy(true, "Loading model...");
 
         try
         {
-            // 2. 백그라운드 스레드에서 무거운 작업(모델 로딩) 실행
-            // UI 스레드는 여기서 멈추지 않고 계속 반응(창 이동 등)할 수 있음
+            // 백그라운드에서 로딩
             LamaInpainter loadedInpainter = await Task.Run(() =>
             {
-                // 이 블록 안은 백그라운드에서 돕니다.
                 return new LamaInpainter(selectedPath);
             });
 
-            // 3. 로딩 성공 시 UI 업데이트 (다시 메인 스레드)
-            // 기존 모델이 있다면 정리
             _inpainter?.Dispose();
-
             _inpainter = loadedInpainter;
             _modelPath = selectedPath;
 
-            TxtModel.Text = Path.GetFileName(_modelPath); // 파일명만 보여주기 (깔끔하게)
-            TxtStatus.Text = "Model loaded successfully.";
+            TxtModel.Text = Path.GetFileName(_modelPath);
+            SetStatus("Model loaded.");
         }
         catch (Exception ex)
         {
-            // 4. 실패 처리
-            TxtStatus.Text = "Load failed.";
+            SetStatus("Load failed.");
             MessageBox.Show($"Failed to load model:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            // 5. UI 상태 복구 (성공/실패 여부와 상관없이 실행)
-            Mouse.OverrideCursor = null;
-            BtnPickModel.IsEnabled = true;
-            PbarLoading.Visibility = Visibility.Collapsed; // 프로그래스바 숨김
-            UpdateRunEnabled();
+            SetBusy(false);
         }
     }
 
     private void BtnOpenImage_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
+
         var dlg = new OpenFileDialog
         {
             Title = "Open Image",
@@ -92,51 +122,64 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog() != true) return;
 
-        _imagePath = dlg.FileName;
-        LoadInput(_imagePath);
-        ClearSelection();
-        ImgOutput.Source = null;
-        TxtStatus.Text = "Image loaded.";
+        try
+        {
+            LoadInput(dlg.FileName);
+            ClearSelection();
+            ImgOutput.Source = null;
+            SetStatus("Image loaded.");
+        }
+        catch (Exception ex)
+        {
+            SetStatus("Image load failed.");
+            MessageBox.Show($"Failed to load image:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
         UpdateRunEnabled();
     }
 
     private async void BtnRun_Click(object sender, RoutedEventArgs e)
     {
+        if (_busy) return;
         if (_inpainter == null || _inputBitmap == null || _selectedRectPx == null) return;
+
+        var r = _selectedRectPx.Value;
+        if (r.Width < 2 || r.Height < 2)
+        {
+            MessageBox.Show("Mask rectangle is too small.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        SetBusy(true, "Processing...");
 
         try
         {
-            TxtStatus.Text = "Processing...";
-            BtnRun.IsEnabled = false;
-            Mouse.OverrideCursor = Cursors.Wait;
-
             byte[] inputBytes = BitmapToBytes(_inputBitmap);
-            byte[] maskBytes = CreateMaskBytes(_inputBitmap.PixelWidth, _inputBitmap.PixelHeight, _selectedRectPx.Value);
+            byte[] maskBytes = CreateMaskBytes(_inputBitmap.PixelWidth, _inputBitmap.PixelHeight, r);
 
-            // 비동기 실행 (UI 멈춤 방지)
-            byte[] resultBytes = await Task.Run(() => 
+            // 백그라운드에서 처리
+            byte[] resultBytes = await Task.Run(() =>
             {
                 return _inpainter.ProcessImage(inputBytes, maskBytes);
             });
 
             ImgOutput.Source = BytesToBitmap(resultBytes);
-            TxtStatus.Text = "Done.";
+            SetStatus("Done.");
         }
         catch (Exception ex)
         {
-            TxtStatus.Text = "Error.";
-            MessageBox.Show($"Processing Error: {ex.Message}");
+            SetStatus("Error.");
+            MessageBox.Show($"Processing Error:\n{ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
-            Mouse.OverrideCursor = null;
-            UpdateRunEnabled();
+            SetBusy(false);
         }
     }
 
     private void UpdateRunEnabled()
     {
-        BtnRun.IsEnabled = _inpainter != null && _imagePath != null && _selectedRectPx != null;
+        BtnRun.IsEnabled = !_busy && _inpainter != null && _inputBitmap != null && _selectedRectPx != null;
     }
 
     private void LoadInput(string path)
@@ -147,6 +190,7 @@ public partial class MainWindow : Window
         bmp.UriSource = new Uri(path);
         bmp.EndInit();
         bmp.Freeze();
+
         _inputBitmap = bmp;
         ImgInput.Source = _inputBitmap;
     }
@@ -174,6 +218,7 @@ public partial class MainWindow : Window
 
     private byte[] CreateMaskBytes(int width, int height, Int32Rect rect)
     {
+        // Gray8: 0=background, 255=mask
         var wb = new WriteableBitmap(width, height, 96, 96, PixelFormats.Gray8, null);
         int stride = width;
         byte[] pixels = new byte[stride * height];
@@ -201,7 +246,8 @@ public partial class MainWindow : Window
     // --- Overlay & Selection Logic ---
     private void Overlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (_inputBitmap == null) return;
+        if (_inputBitmap == null || _busy) return;
+
         _dragging = true;
         _dragStart = e.GetPosition(Overlay);
         Overlay.CaptureMouse();
@@ -216,22 +262,23 @@ public partial class MainWindow : Window
             };
             Overlay.Children.Add(_rectVisual);
         }
+
         Canvas.SetLeft(_rectVisual, _dragStart.X);
         Canvas.SetTop(_rectVisual, _dragStart.Y);
         _rectVisual.Width = 0;
         _rectVisual.Height = 0;
-        _selectedRectPx = null;
-        UpdateRunEnabled();
     }
 
     private void Overlay_MouseMove(object sender, MouseEventArgs e)
     {
         if (!_dragging || _rectVisual == null) return;
+
         var p = e.GetPosition(Overlay);
         var x = Math.Min(p.X, _dragStart.X);
         var y = Math.Min(p.Y, _dragStart.Y);
         var w = Math.Abs(p.X - _dragStart.X);
         var h = Math.Abs(p.Y - _dragStart.Y);
+
         Canvas.SetLeft(_rectVisual, x);
         Canvas.SetTop(_rectVisual, y);
         _rectVisual.Width = w;
@@ -240,41 +287,52 @@ public partial class MainWindow : Window
 
     private void Overlay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_dragging) return;
+        if (!_dragging || _rectVisual == null || _inputBitmap == null) return;
+
         _dragging = false;
         Overlay.ReleaseMouseCapture();
 
-        if (_rectVisual == null || _inputBitmap == null) return;
-        
-        var overlayRect = new Int32Rect(
-            (int)Canvas.GetLeft(_rectVisual), (int)Canvas.GetTop(_rectVisual),
-            (int)_rectVisual.Width, (int)_rectVisual.Height);
+        var overlayRect = new Rect(
+            Canvas.GetLeft(_rectVisual),
+            Canvas.GetTop(_rectVisual),
+            _rectVisual.Width,
+            _rectVisual.Height);
 
-        var px = MapOverlayRectToImagePixels(overlayRect, _inputBitmap);
-        if (px.Width < 2 || px.Height < 2) { ClearSelection(); return; }
+        _selectedRectPx = OverlayRectToPixelRect(overlayRect);
 
-        _selectedRectPx = px;
-        TxtStatus.Text = $"Selected: {px.Width}x{px.Height}";
         UpdateRunEnabled();
+        SetStatus($"Mask selected: {_selectedRectPx.Value.Width}x{_selectedRectPx.Value.Height}px");
     }
 
     private void ClearSelection()
     {
         _selectedRectPx = null;
-        if (_rectVisual != null) { _rectVisual.Width = 0; _rectVisual.Height = 0; }
+
+        if (_rectVisual != null)
+        {
+            Overlay.Children.Remove(_rectVisual);
+            _rectVisual = null;
+        }
+
         UpdateRunEnabled();
     }
 
-    private Int32Rect MapOverlayRectToImagePixels(Int32Rect overlayRect, BitmapSource img)
+    private Int32Rect OverlayRectToPixelRect(Rect overlayRect)
     {
+        if (_inputBitmap == null) return new Int32Rect(0, 0, 0, 0);
+
+        double iw = _inputBitmap.PixelWidth;
+        double ih = _inputBitmap.PixelHeight;
+
         double cw = Overlay.ActualWidth;
         double ch = Overlay.ActualHeight;
-        double iw = img.PixelWidth;
-        double ih = img.PixelHeight;
 
-        double s = Math.Min(cw / iw, ch / ih);
-        double dispW = iw * s;
-        double dispH = ih * s;
+        if (cw <= 0 || ch <= 0 || iw <= 0 || ih <= 0)
+            return new Int32Rect(0, 0, 0, 0);
+
+        double scale = Math.Min(cw / iw, ch / ih);
+        double dispW = iw * scale;
+        double dispH = ih * scale;
         double offX = (cw - dispW) / 2.0;
         double offY = (ch - dispH) / 2.0;
 
@@ -283,10 +341,10 @@ public partial class MainWindow : Window
         double x2 = Math.Clamp(overlayRect.X + overlayRect.Width, offX, offX + dispW);
         double y2 = Math.Clamp(overlayRect.Y + overlayRect.Height, offY, offY + dispH);
 
-        int px1 = (int)((x1 - offX) / s);
-        int py1 = (int)((y1 - offY) / s);
-        int px2 = (int)((x2 - offX) / s);
-        int py2 = (int)((y2 - offY) / s);
+        int px1 = (int)((x1 - offX) / scale);
+        int py1 = (int)((y1 - offY) / scale);
+        int px2 = (int)((x2 - offX) / scale);
+        int py2 = (int)((y2 - offY) / scale);
 
         return new Int32Rect(px1, py1, Math.Max(0, px2 - px1), Math.Max(0, py2 - py1));
     }

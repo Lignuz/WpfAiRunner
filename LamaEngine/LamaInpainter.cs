@@ -15,7 +15,10 @@ public class LamaInpainter : IDisposable
     {
         var so = new SessionOptions
         {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC, 
+            // NOTE: ORT_ENABLE_BASIC is conservative and tends to be stable across many models.
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
+            IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount - 1),
+            InterOpNumThreads = 1
         };
         _session = new InferenceSession(modelPath, so);
     }
@@ -24,6 +27,14 @@ public class LamaInpainter : IDisposable
     {
         using var src = Image.Load<Rgba32>(imageBytes);
         using var mask = Image.Load<L8>(maskBytes);
+
+        // If mask is empty -> no-op (return original image).
+        if (!HasAnyMask(mask))
+        {
+            using var msNoop = new MemoryStream();
+            src.SaveAsPng(msNoop);
+            return msNoop.ToArray();
+        }
 
         var roi = GetMaskBoundingBox(mask);
         roi = AdjustRoiToSquare(roi, src.Width, src.Height);
@@ -57,6 +68,28 @@ public class LamaInpainter : IDisposable
         var outputTensor = results.First().AsTensor<float>();
 
         return TensorToImageAuto(outputTensor);
+    }
+
+    
+    private bool HasAnyMask(Image<L8> mask)
+    {
+        bool any = false;
+        mask.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < mask.Height && !any; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < mask.Width; x++)
+                {
+                    if (row[x].PackedValue > 127)
+                    {
+                        any = true;
+                        break;
+                    }
+                }
+            }
+        });
+        return any;
     }
 
     private Rectangle GetMaskBoundingBox(Image<L8> mask)
