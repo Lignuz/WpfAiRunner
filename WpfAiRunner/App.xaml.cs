@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace LamaWpf;
+namespace WpfAiRunner;
 
 public partial class App : Application
 {

@@ -7,7 +7,7 @@ using Microsoft.Win32;
 using LamaEngine;
 using System.Windows.Controls;
 
-namespace LamaWpf;
+namespace WpfAiRunner;
 
 public partial class MainWindow : Window
 {

@@ -4,7 +4,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamaEngine", "LamaEngine\LamaEngine.csproj", "{11111111-1111-1111-1111-111111111111}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LamaWpf", "LamaWpf\LamaWpf.csproj", "{22222222-2222-2222-2222-222222222222}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfAiRunner", "WpfAiRunner\WpfAiRunner.csproj", "{F474CBBC-00D2-7154-29B6-9CC2E09ED291}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -16,9 +16,15 @@ Global
 		{11111111-1111-1111-1111-111111111111}.Debug|x64.Build.0 = Debug|x64
 		{11111111-1111-1111-1111-111111111111}.Release|x64.ActiveCfg = Release|x64
 		{11111111-1111-1111-1111-111111111111}.Release|x64.Build.0 = Release|x64
-		{22222222-2222-2222-2222-222222222222}.Debug|x64.ActiveCfg = Debug|x64
-		{22222222-2222-2222-2222-222222222222}.Debug|x64.Build.0 = Debug|x64
-		{22222222-2222-2222-2222-222222222222}.Release|x64.ActiveCfg = Release|x64
-		{22222222-2222-2222-2222-222222222222}.Release|x64.Build.0 = Release|x64
+		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Debug|x64.ActiveCfg = Debug|x64
+		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Debug|x64.Build.0 = Debug|x64
+		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Release|x64.ActiveCfg = Release|x64
+		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {30B97A62-E328-4E90-86C8-1DBBB367646B}
 	EndGlobalSection
 EndGlobal
