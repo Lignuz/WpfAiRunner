@@ -1,48 +1,56 @@
-﻿# LamaWpf
+﻿# WpfAiRunner
 
-WPF test UI for LaMa (ONNX) inpainting.
+A high-performance WPF application for running local AI models via **ONNX Runtime**.
+This project demonstrates a production-ready implementation of **LaMa (Large Mask Inpainting)** with hybrid CPU/GPU execution support.
 
-## Features
-- Load ONNX model (`*.onnx`)
-- Load input image
-- Create mask with:
-  - **Rect**: drag to add multiple rectangles (accumulates)
-  - **Brush**: paint with mouse (accumulates), brush size preview circle on hover
-- Run inpainting and show output
-- **Clear Mask** clears only the mask (keeps output)
+## ✨ Key Features
 
-## Build / Run
-- Visual Studio 2022
-- .NET 8 (x64)
+### Architecture & Performance
+- **Modular Design**: UI (`WpfAiRunner`) and Inference Engine (`LamaEngine`) are strictly separated for maintainability.
+- **Hybrid Execution**: Supports both **CPU** and **GPU (CUDA)** with a run-time toggle switch.
+- **Smart Fallback**: Automatically falls back to CPU if GPU initialization fails (e.g., missing drivers).
+- **Optimization**: Includes **Warm-up** logic to eliminate initial inference latency and async processing to prevent UI freezing.
 
-Open `LamaWpf.sln` and run `LamaWpf` project.
+### LaMa Implementation Details
+- **Smart Preprocessing**: Automatically crops and resizes the ROI (Region of Interest) to `512x512` for the model, then seamlessly pastes the result back to the original resolution.
+- **Auto Scale**: Detects model output range dynamically to ensure correct color rendering.
+- **Masking Tools**:
+  - **Rect**: Drag to create rectangular masks.
+  - **Brush**: Freehand masking with adjustable brush size.
 
-## Notes
-- Mask is stored as **Gray8** (0/255). Multiple regions are supported because the mask is a single bitmap buffer.
-- If you want "erase brush" later, you can add a mode to write `0` instead of `255` in `PaintBrushAt()`.
+## 🛠️ Build & Run
 
-## Third-party / License Notice
+### Prerequisites
+- **Visual Studio 2022**
+- **.NET 8 SDK**
+- **Platform**: Windows x64
+
+### GPU Requirements (Optional)
+To enable CUDA acceleration:
+- NVIDIA GPU
+- **CUDA Toolkit 11.8**
+- **cuDNN 8.x** (compatible with CUDA 11.x)
+- *Note: If requirements are not met, the app will safely run in CPU mode.*
+
+### Setup
+1. Open `WpfAiRunner.sln` in Visual Studio.
+2. Restore NuGet packages.
+   - Core dependency: `Microsoft.ML.OnnxRuntime.Gpu` (v1.15.1).
+3. Set the build platform to **x64**.
+4. Build and Run the `WpfAiRunner` project.
+
+## 📂 Project Structure
+
+- **WpfAiRunner** (UI): Handles user interaction, rendering, and model selection.
+- **LamaEngine** (Library): Encapsulates ONNX session management, tensor processing, and image manipulation logic.
+
+## ⚖️ License & Acknowledgements
+
 This project uses third-party open-source software and pretrained models.
 
-### 1. LaMa (Original Research & Implementation)
-- Repository: https://github.com/advimman/lama
-- Paper: *LaMa: Resolution-robust Large Mask Inpainting with Fourier Convolutions* (WACV 2022)
-- License: Apache License 2.0
-
-Copyright information is provided in the original repository’s LICENSE file.
-
-### 2. LaMa-ONNX (ONNX Model Conversion)
-- Model page: https://huggingface.co/Carve/LaMa-ONNX
-- Model file used:
-  - https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx
-- License: Apache License 2.0
-
-The ONNX model is redistributed under the terms specified by the model publisher.
-Copyright ownership remains with the original authors.
+- **Original Paper**: [Resolution-robust Large Mask Inpainting with Fourier Convolutions](https://arxiv.org/abs/2109.07161) (WACV 2022)
+- **Official Repository**: [advimman/lama](https://github.com/advimman/lama) (Apache 2.0)
+- **Model Source**: [LaMa-ONNX via HuggingFace](https://huggingface.co/Carve/LaMa-ONNX)
 
 ### Disclaimer
-This project is not affiliated with, endorsed by, or sponsored by the original authors
-or the model publisher.
-
-For full license terms, see:
-https://www.apache.org/licenses/LICENSE-2.0
+This project is an independent implementation for testing and educational purposes.
