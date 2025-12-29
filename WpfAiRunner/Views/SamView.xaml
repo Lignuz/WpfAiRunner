@@ -23,6 +23,12 @@
         <!-- Top Bar -->
         <DockPanel Grid.Row="0" Margin="8">
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <ComboBox x:Name="CboModelType" Width="100" Margin="0,0,8,0" 
+                          VerticalContentAlignment="Center" SelectedIndex="1">
+                    <ComboBoxItem Content="MobileSAM" />
+                    <ComboBoxItem Content="SAM 2" />
+                </ComboBox>
+
                 <Button x:Name="BtnLoadModels" Content="1. Load Models..." Width="140" Margin="0,0,8,0"
                         Click="BtnLoadModels_Click"/>
                 <CheckBox x:Name="ChkUseGpu" Content="Use GPU" VerticalAlignment="Center" Foreground="#DDD" Margin="0,0,12,0"/>

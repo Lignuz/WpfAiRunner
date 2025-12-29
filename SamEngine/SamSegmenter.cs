@@ -7,7 +7,8 @@ using System.Collections.Concurrent;
 
 namespace SamEngine;
 
-public class SamSegmenter : IDisposable
+// ISamSegmenter 인터페이스 구현
+public class SamSegmenter : ISamSegmenter
 {
     private InferenceSession? _encoderSession;
     private InferenceSession? _decoderSession;
@@ -97,11 +98,6 @@ public class SamSegmenter : IDisposable
     /// 좌표 프롬프트를 받아 Decoder를 실행합니다.
     /// 가장 점수가 높은 마스크 이미지는 즉시 생성하여 반환하고, 나머지는 텐서 형태로 캐싱합니다.
     /// </summary>
-    /// <returns>
-    /// Scores: 모든 후보의 점수 리스트
-    /// BestMaskBytes: 가장 점수가 높은 마스크의 PNG 이미지 데이터
-    /// BestIndex: 가장 점수가 높은 마스크의 인덱스
-    /// </returns>
     public (List<float> Scores, byte[] BestMaskBytes, int BestIndex) Predict(float x, float y)
     {
         if (_decoderSession == null || _imageEmbeddings == null)
@@ -179,7 +175,6 @@ public class SamSegmenter : IDisposable
 
     /// <summary>
     /// 캐싱된 마스크 텐서에서 특정 인덱스의 마스크만 이미지(PNG)로 변환하여 반환합니다.
-    /// (사용자가 콤보박스에서 다른 후보를 선택했을 때 호출됨)
     /// </summary>
     public byte[] GetMaskImage(int index)
     {

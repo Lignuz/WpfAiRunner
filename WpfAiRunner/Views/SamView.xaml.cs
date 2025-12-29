@@ -13,34 +13,90 @@ namespace WpfAiRunner.Views;
 
 public partial class SamView : UserControl, IDisposable
 {
-    private readonly SamSegmenter _segmenter = new();
+    // 인터페이스 타입으로 선언 (동적 할당)
+    private ISamSegmenter _segmenter;
     private BitmapSource? _inputBitmap;   // DPI 정규화된 입력 이미지
     private bool _isModelLoaded;
     private bool _isImageEncoded;
-    private Point? _lastClickRatio; // 오버레이 표시용 상대 좌표(0~1)
+    private Point? _lastClickRatio;       // 오버레이 표시용 상대 좌표
 
-    // 이벤트를 잠시 막기 위한 플래그
+    // 콤보박스 업데이트 중인지 체크하는 플래그
     private bool _isUpdatingCombo;
 
-    public SamView() => InitializeComponent();
-    public void Dispose() => _segmenter.Dispose();
+    public SamView()
+    {
+        InitializeComponent();
+        // 기본값은 SAM 2로 설정 (초기화)
+        _segmenter = new Sam2Segmenter();
+    }
+
+    public void Dispose() => _segmenter?.Dispose();
 
     private void UserControl_Loaded(object sender, RoutedEventArgs e) { }
 
     private async void BtnLoadModels_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Title = "Select Encoder", Filter = "ONNX|*.onnx" };
+        // 1. 현재 선택된 모델 타입 확인
+        int modelTypeIndex = CboModelType.SelectedIndex; // 0: MobileSAM, 1: SAM 2
+
+        // 2. 엔진 교체
+        _segmenter.Dispose();
+        if (modelTypeIndex == 0) _segmenter = new SamSegmenter();
+        else _segmenter = new Sam2Segmenter();
+
+        var dlg = new OpenFileDialog { Title = $"Select {CboModelType.Text} Encoder", Filter = "ONNX|*.onnx" };
         if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
 
         string encoderPath = dlg.FileName;
         string folder = Path.GetDirectoryName(encoderPath)!;
-        string decoderPath = Directory.GetFiles(folder, "*decoder*.onnx").FirstOrDefault() ?? encoderPath;
+        string encoderNameLower = Path.GetFileName(encoderPath).ToLower();
 
-        // 디코더 자동 선택 실패 시 사용자에게 확인
+        // 3. 디코더 자동 찾기 로직 (엄격한 구분 적용)
+        string? decoderPath = null;
+        var allDecoders = Directory.GetFiles(folder, "*decoder*.onnx");
+
+        if (modelTypeIndex == 1) // [SAM 2 모드]
+        {
+            // (1) 같은 변종(tiny, small 등)을 가진 SAM 2 디코더 우선 검색
+            string[] variants = { "tiny", "small", "base_plus", "large" };
+            string? detectedVariant = variants.FirstOrDefault(v => encoderNameLower.Contains(v));
+
+            if (!string.IsNullOrEmpty(detectedVariant))
+            {
+                decoderPath = allDecoders.FirstOrDefault(f =>
+                    Path.GetFileName(f).ToLower().Contains(detectedVariant) &&
+                    Path.GetFileName(f).ToLower().Contains("sam2")); // sam2 키워드 필수
+            }
+
+            // (2) 없으면 'sam2'나 'hiera'가 들어간 아무 디코더 검색
+            decoderPath ??= allDecoders.FirstOrDefault(f =>
+            {
+                string name = Path.GetFileName(f).ToLower();
+                return name.Contains("sam2") || name.Contains("hiera");
+            });
+        }
+        else // [MobileSAM 모드]
+        {
+            // (1) 'mobile_sam'이 들어간 디코더 우선 검색
+            decoderPath = allDecoders.FirstOrDefault(f => Path.GetFileName(f).ToLower().Contains("mobile"));
+
+            // (2) 없으면 일반 디코더를 찾되, **SAM 2용 파일은 제외**
+            decoderPath ??= allDecoders.FirstOrDefault(f =>
+            {
+                string name = Path.GetFileName(f).ToLower();
+                // [핵심] SAM 2 전용 키워드가 없는 파일만 선택
+                return !name.Contains("sam2") && !name.Contains("hiera");
+            });
+        }
+
+        // 4. 그래도 못 찾았으면 인코더 경로를 임시로 넣어서 아래 확인창 띄움
+        decoderPath ??= encoderPath;
+
+        // 5. 사용자 확인 (자동 선택된 것이 맞는지)
         if (decoderPath == encoderPath ||
             MessageBox.Show($"Use decoder: {Path.GetFileName(decoderPath)}?", "Confirm", MessageBoxButton.YesNo) == MessageBoxResult.No)
         {
-            var dlg2 = new OpenFileDialog { Title = "Select Decoder", Filter = "ONNX|*.onnx", InitialDirectory = folder };
+            var dlg2 = new OpenFileDialog { Title = $"Select {CboModelType.Text} Decoder", Filter = "ONNX|*.onnx", InitialDirectory = folder };
             if (dlg2.ShowDialog(Window.GetWindow(this)) != true) return;
             decoderPath = dlg2.FileName;
         }
@@ -50,13 +106,15 @@ public partial class SamView : UserControl, IDisposable
         {
             bool useGpu = ChkUseGpu.IsChecked == true;
             await Task.Run(() => _segmenter.LoadModels(encoderPath, decoderPath, useGpu));
+
             _isModelLoaded = true;
-            TxtStatus.Text = $"Models Loaded ({_segmenter.DeviceMode})";
+            TxtStatus.Text = $"{CboModelType.Text} Loaded ({_segmenter.DeviceMode})";
             BtnOpenImage.IsEnabled = true;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.ToString());
+            MessageBox.Show($"Error loading {CboModelType.Text}:\n{ex.Message}\n\nCheck if you selected the correct model files.");
+            _isModelLoaded = false;
         }
         finally
         {
@@ -89,7 +147,7 @@ public partial class SamView : UserControl, IDisposable
         _isImageEncoded = false;
         TxtOverlay.Visibility = Visibility.Visible;
 
-        // 콤보박스 초기화
+        // UI 초기화
         CboMaskCandidates.Items.Clear();
         CboMaskCandidates.IsEnabled = false;
 
@@ -102,6 +160,7 @@ public partial class SamView : UserControl, IDisposable
             _isImageEncoded = true;
             TxtStatus.Text = "Ready. Click image.";
             TxtOverlay.Visibility = Visibility.Collapsed;
+
             BtnReset.IsEnabled = true;
         }
         catch (Exception ex)
@@ -139,20 +198,21 @@ public partial class SamView : UserControl, IDisposable
         TxtStatus.Text = $"Segmenting {Math.Round(targetX)},{Math.Round(targetY)}...";
         try
         {
-            // [최적화] 점수뿐만 아니라 1등 마스크 이미지까지 바로 받아옴
+            // 인터페이스를 통한 예측 (MobileSAM 또는 SAM 2)
             var result = await Task.Run(() => _segmenter.Predict(targetX, targetY));
 
             if (result.Scores.Count > 0)
             {
-                // 1. 이미지 즉시 표시 (반응 속도 최적화)
+                // 1. 1등 마스크 즉시 표시
                 if (result.BestMaskBytes.Length > 0)
                 {
                     var maskBmp = BytesToBitmap(result.BestMaskBytes);
                     ImgMask.Source = NormalizeDpi96(maskBmp);
                 }
 
-                // 2. 콤보박스 구성 (SelectionChanged 이벤트 트리거 방지)
+                // 2. 콤보박스 업데이트
                 _isUpdatingCombo = true;
+                CboMaskCandidates.SelectionChanged -= CboMaskCandidates_SelectionChanged;
                 CboMaskCandidates.Items.Clear();
                 CboMaskCandidates.IsEnabled = true;
 
@@ -172,8 +232,7 @@ public partial class SamView : UserControl, IDisposable
                     CboMaskCandidates.Items.Add(cbi);
                 }
 
-                // 현재 보여지고 있는 BestIndex를 콤보박스에서도 선택 상태로 만듦
-                // (이벤트 핸들러 내에서 이미지 생성을 또 하지 않도록 방어)
+                // BestIndex 선택
                 for (int i = 0; i < CboMaskCandidates.Items.Count; i++)
                 {
                     if (CboMaskCandidates.Items[i] is ComboBoxItem item &&
@@ -188,6 +247,7 @@ public partial class SamView : UserControl, IDisposable
                 if (CboMaskCandidates.SelectedIndex < 0)
                     CboMaskCandidates.SelectedIndex = 0;
 
+                CboMaskCandidates.SelectionChanged += CboMaskCandidates_SelectionChanged;
                 _isUpdatingCombo = false;
 
                 TxtStatus.Text = "Done.";
@@ -203,13 +263,11 @@ public partial class SamView : UserControl, IDisposable
     {
         // 콤보박스 자동 세팅 중일 땐 이미지 생성 스킵
         if (_isUpdatingCombo) return;
-
         if (CboMaskCandidates.SelectedItem is not ComboBoxItem selectedItem) return;
         if (selectedItem.Tag is not int maskIndex) return;
 
         TxtStatus.Text = "Rendering Mask...";
 
-        // 사용자가 직접 변경했을 때만 지연 생성 수행
         byte[] maskBytes = await Task.Run(() => _segmenter.GetMaskImage(maskIndex));
 
         if (maskBytes.Length > 0)
