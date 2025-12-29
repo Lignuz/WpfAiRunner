@@ -3,6 +3,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using System.Collections.Concurrent;
 
 namespace SamEngine;
 
@@ -11,20 +12,26 @@ public class SamSegmenter : IDisposable
     private InferenceSession? _encoderSession;
     private InferenceSession? _decoderSession;
 
-    // SAM 모델의 표준 입력 크기
+    // SAM 모델의 표준 입력 해상도 (1024x1024)
     private const int TargetSize = 1024;
 
-    // 인코더가 생성한 이미지 임베딩 데이터 (Decoder 입력용)
+    // Encoder가 생성한 이미지 임베딩 데이터 (Decoder 입력용, 캐싱됨)
     private float[]? _imageEmbeddings;
 
     // 원본 이미지 크기
     private int _orgW, _orgH;
 
-    // 리사이징된 실제 이미지 크기 (패딩 제외)
+    // 전처리(리사이징)된 실제 이미지 크기 (패딩 제외)
     private int _resizedW, _resizedH;
+
+    // 추론된 마스크 결과 텐서를 임시 보관하는 변수 (지연 생성을 위함)
+    private Tensor<float>? _lastMaskTensor;
 
     public string DeviceMode { get; private set; } = "CPU";
 
+    /// <summary>
+    /// ONNX 모델(Encoder, Decoder)을 로드합니다.
+    /// </summary>
     public void LoadModels(string encoderPath, string decoderPath, bool useGpu)
     {
         var so = new SessionOptions();
@@ -47,7 +54,7 @@ public class SamSegmenter : IDisposable
     }
 
     /// <summary>
-    /// 이미지를 1024x1024 크기로 전처리(비율 유지 리사이징 + 패딩)하고 인코딩을 수행합니다.
+    /// 이미지를 전처리(비율 유지 리사이징 + 패딩)하고 Encoder를 실행하여 임베딩을 생성합니다.
     /// </summary>
     public void EncodeImage(byte[] imageBytes)
     {
@@ -58,7 +65,7 @@ public class SamSegmenter : IDisposable
         _orgW = image.Width;
         _orgH = image.Height;
 
-        // 긴 변을 1024로 맞추는 스케일 계산
+        // 긴 변을 1024로 맞추는 스케일 비율 계산
         float scale = (float)TargetSize / Math.Max(_orgW, _orgH);
         _resizedW = (int)(_orgW * scale);
         _resizedH = (int)(_orgH * scale);
@@ -66,13 +73,14 @@ public class SamSegmenter : IDisposable
         // 1. 비율 유지 리사이징
         image.Mutate(x => x.Resize(_resizedW, _resizedH));
 
-        // 2. 1024x1024 검은색 캔버스 생성 (Padding)
+        // 2. 1024x1024 검은색 캔버스 생성 (Padding 영역)
         using var paddedImage = new Image<Rgba32>(TargetSize, TargetSize);
         paddedImage.Mutate(x => x.BackgroundColor(Color.Black));
 
         // 3. 리사이징된 이미지를 좌상단(0,0)에 배치
         paddedImage.Mutate(x => x.DrawImage(image, new Point(0, 0), 1f));
 
+        // Encoder 실행
         string inputName = _encoderSession.InputMetadata.Keys.First();
         var inputTensor = CreateEncoderInputTensor(paddedImage);
 
@@ -86,32 +94,37 @@ public class SamSegmenter : IDisposable
     }
 
     /// <summary>
-    /// 원본 이미지 좌표(x, y)를 받아 마스크를 생성합니다.
+    /// 좌표 프롬프트를 받아 Decoder를 실행합니다.
+    /// 가장 점수가 높은 마스크 이미지는 즉시 생성하여 반환하고, 나머지는 텐서 형태로 캐싱합니다.
     /// </summary>
-    public byte[] PredictMask(float x, float y)
+    /// <returns>
+    /// Scores: 모든 후보의 점수 리스트
+    /// BestMaskBytes: 가장 점수가 높은 마스크의 PNG 이미지 데이터
+    /// BestIndex: 가장 점수가 높은 마스크의 인덱스
+    /// </returns>
+    public (List<float> Scores, byte[] BestMaskBytes, int BestIndex) Predict(float x, float y)
     {
-        if (_decoderSession == null)
-            throw new InvalidOperationException("Decoder model is not loaded.");
-        if (_imageEmbeddings == null)
-            return Array.Empty<byte>();
+        if (_decoderSession == null || _imageEmbeddings == null)
+            return (new List<float>(), Array.Empty<byte>(), -1);
 
         // Embedding Tensor 준비
         var embedTensor = new DenseTensor<float>(_imageEmbeddings, new[] { 1, 256, 64, 64 });
 
-        // 좌표 변환: 원본 좌표 -> 1024 스케일 좌표
+        // 좌표 변환 (원본 좌표 -> 1024 모델 입력 좌표)
+        var pointCoords = new DenseTensor<float>(new[] { 1, 2, 2 });
         float scale = (float)TargetSize / Math.Max(_orgW, _orgH);
 
-        var pointCoords = new DenseTensor<float>(new[] { 1, 2, 2 });
         pointCoords[0, 0, 0] = x * scale;
         pointCoords[0, 0, 1] = y * scale;
         pointCoords[0, 1, 0] = 0f; // Padding Point
         pointCoords[0, 1, 1] = 0f;
 
-        // 라벨 설정 (1=포함, -1=패딩)
+        // 라벨 설정 (1=Positive Click, -1=Padding)
         var pointLabels = new DenseTensor<float>(new[] { 1, 2 });
         pointLabels[0, 0] = 1.0f;
         pointLabels[0, 1] = -1.0f;
 
+        // 기타 필수 입력 텐서 준비
         var maskInput = new DenseTensor<float>(new[] { 1, 1, 256, 256 });
         var hasMaskInput = new DenseTensor<float>(new[] { 0.0f }, new[] { 1 });
         var origImSize = new DenseTensor<float>(new[] { (float)TargetSize, (float)TargetSize }, new[] { 2 });
@@ -126,11 +139,55 @@ public class SamSegmenter : IDisposable
             NamedOnnxValue.CreateFromTensor("orig_im_size", origImSize),
         };
 
+        // Decoder 추론 실행
         using var decResults = _decoderSession.Run(inputs);
-        var maskTensor = decResults.First().AsTensor<float>();
 
-        return MaskTensorToPng(maskTensor);
+        var maskResult = decResults.FirstOrDefault(r => r.Name == "masks") ?? decResults.First();
+        var iouResult = decResults.FirstOrDefault(r => r.Name == "iou_predictions");
+
+        // 추론된 마스크 텐서를 메모리에 복사하여 캐싱 (다른 후보 선택 시 사용)
+        _lastMaskTensor = maskResult.AsTensor<float>().ToDenseTensor();
+
+        var iouTensor = iouResult?.AsTensor<float>();
+        var scores = new List<float>();
+
+        // 점수 계산 및 최고 점수 인덱스 찾기
+        int candidateCount = _lastMaskTensor.Dimensions[1];
+        int bestIndex = 0;
+        float maxScore = -1f;
+
+        for (int i = 0; i < candidateCount; i++)
+        {
+            float rawScore = iouTensor != null ? iouTensor[0, i] : 0.0f;
+            if (rawScore > 1.0f) rawScore = 1.0f;
+            if (rawScore < 0.0f) rawScore = 0.0f;
+
+            scores.Add(rawScore);
+
+            if (rawScore > maxScore)
+            {
+                maxScore = rawScore;
+                bestIndex = i;
+            }
+        }
+
+        // [최적화] 가장 확실한 마스크 1장은 여기서 바로 생성 (UI 딜레이 제거)
+        byte[] bestMaskBytes = MaskTensorToPng(_lastMaskTensor, bestIndex);
+
+        return (scores, bestMaskBytes, bestIndex);
     }
+
+    /// <summary>
+    /// 캐싱된 마스크 텐서에서 특정 인덱스의 마스크만 이미지(PNG)로 변환하여 반환합니다.
+    /// (사용자가 콤보박스에서 다른 후보를 선택했을 때 호출됨)
+    /// </summary>
+    public byte[] GetMaskImage(int index)
+    {
+        if (_lastMaskTensor == null) return Array.Empty<byte>();
+        return MaskTensorToPng(_lastMaskTensor, index);
+    }
+
+    // --- Private Helpers ---
 
     private DenseTensor<float> CreateEncoderInputTensor(Image<Rgba32> img1024)
     {
@@ -148,7 +205,6 @@ public class SamSegmenter : IDisposable
                 for (int x = 0; x < W; x++)
                 {
                     var p = row[x];
-                    // SAM 표준 정규화
                     tensor[y, x, 0] = (p.R - 123.675f) / 58.395f;
                     tensor[y, x, 1] = (p.G - 116.28f) / 57.12f;
                     tensor[y, x, 2] = (p.B - 103.53f) / 57.375f;
@@ -165,15 +221,14 @@ public class SamSegmenter : IDisposable
         var data = outputTensor.ToArray();
         var chw = new float[256 * 64 * 64];
 
-        // 출력 형태에 따라 데이터 레이아웃 재배치 (N, H, W, C -> N, C, H, W 등)
         if (dims.Length == 4)
         {
-            if (dims[1] == 256) // 이미 CHW 형태
+            if (dims[1] == 256) // NCHW
             {
                 Buffer.BlockCopy(data, 0, chw, 0, sizeof(float) * chw.Length);
                 return chw;
             }
-            if (dims[3] == 256) // NHWC 형태 -> CHW로 변환
+            if (dims[3] == 256) // NHWC -> NCHW 변환
             {
                 int h = 64, w = 64, c = 256;
                 Parallel.For(0, h * w, i =>
@@ -189,22 +244,17 @@ public class SamSegmenter : IDisposable
             }
         }
 
-        // 예외 처리: 차원 정보가 3개인 경우 등은 상황에 맞게 추가 구현 필요
-        // 현재는 일반적인 [1, 256, 64, 64]와 [1, 64, 64, 256]만 처리
-        if (chw.Length != data.Length)
-            Buffer.BlockCopy(data, 0, chw, 0, sizeof(float) * chw.Length); // 단순 복사 시도
-        else
-            return data; // fallback
+        if (chw.Length == data.Length)
+            Buffer.BlockCopy(data, 0, chw, 0, sizeof(float) * chw.Length);
 
         return chw;
     }
 
-    private byte[] MaskTensorToPng(Tensor<float> maskTensor)
+    private byte[] MaskTensorToPng(Tensor<float> maskTensor, int maskIndex)
     {
         int rank = maskTensor.Dimensions.Length;
         int h = 256, w = 256;
 
-        // 텐서의 실제 차원 크기 확인
         if (rank >= 2)
         {
             h = maskTensor.Dimensions[rank - 2];
@@ -221,18 +271,19 @@ public class SamSegmenter : IDisposable
                 for (int x = 0; x < w; x++)
                 {
                     float v = 0f;
-                    if (rank == 4) v = maskTensor[0, 0, y, x];
-                    else if (rank == 3) v = maskTensor[0, y, x];
-                    else if (rank == 2) v = maskTensor[y, x];
+                    if (rank == 4)
+                        v = maskTensor[0, maskIndex, y, x];
+                    else if (rank == 3)
+                        v = maskTensor[maskIndex, y, x];
+                    else
+                        v = maskTensor[y, x];
 
-                    // Logit 값이 0보다 크면 마스크 영역
                     row[x] = new L8(v > 0.0f ? (byte)255 : (byte)0);
                 }
             }
         });
 
-        // 유효 영역 계산: 입력(1024) 대비 실제 이미지(_resizedW)가 차지하는 비율 계산
-        // 이를 통해 모델 출력이 256이든 1024든 상관없이 정확한 비율로 크롭 가능
+        // 원본 비율에 맞게 유효 영역 계산 (Dynamic Crop)
         double ratioW = (double)_resizedW / TargetSize;
         double ratioH = (double)_resizedH / TargetSize;
 
@@ -242,10 +293,8 @@ public class SamSegmenter : IDisposable
         validW = Math.Clamp(validW, 1, w);
         validH = Math.Clamp(validH, 1, h);
 
-        // 검은색 패딩 영역 제거 (Crop)
         rawMask.Mutate(x => x.Crop(new Rectangle(0, 0, validW, validH)));
 
-        // 원본 크기로 복원 (Stretch)
         rawMask.Mutate(x => x.Resize(new ResizeOptions
         {
             Size = new Size(_orgW, _orgH),

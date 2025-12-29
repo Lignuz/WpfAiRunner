@@ -19,6 +19,9 @@ public partial class SamView : UserControl, IDisposable
     private bool _isImageEncoded;
     private Point? _lastClickRatio; // 오버레이 표시용 상대 좌표(0~1)
 
+    // 이벤트를 잠시 막기 위한 플래그
+    private bool _isUpdatingCombo;
+
     public SamView() => InitializeComponent();
     public void Dispose() => _segmenter.Dispose();
 
@@ -86,6 +89,10 @@ public partial class SamView : UserControl, IDisposable
         _isImageEncoded = false;
         TxtOverlay.Visibility = Visibility.Visible;
 
+        // 콤보박스 초기화
+        CboMaskCandidates.Items.Clear();
+        CboMaskCandidates.IsEnabled = false;
+
         SetBusy(true, "Encoding...");
         try
         {
@@ -132,18 +139,84 @@ public partial class SamView : UserControl, IDisposable
         TxtStatus.Text = $"Segmenting {Math.Round(targetX)},{Math.Round(targetY)}...";
         try
         {
-            byte[] maskBytes = await Task.Run(() => _segmenter.PredictMask(targetX, targetY));
-            if (maskBytes.Length > 0)
+            // [최적화] 점수뿐만 아니라 1등 마스크 이미지까지 바로 받아옴
+            var result = await Task.Run(() => _segmenter.Predict(targetX, targetY));
+
+            if (result.Scores.Count > 0)
             {
-                var maskBmp = BytesToBitmap(maskBytes);
-                // 결과 마스크도 DPI 정규화하여 원본 이미지와 정확히 겹치게 함
-                ImgMask.Source = NormalizeDpi96(maskBmp);
+                // 1. 이미지 즉시 표시 (반응 속도 최적화)
+                if (result.BestMaskBytes.Length > 0)
+                {
+                    var maskBmp = BytesToBitmap(result.BestMaskBytes);
+                    ImgMask.Source = NormalizeDpi96(maskBmp);
+                }
+
+                // 2. 콤보박스 구성 (SelectionChanged 이벤트 트리거 방지)
+                _isUpdatingCombo = true;
+                CboMaskCandidates.Items.Clear();
+                CboMaskCandidates.IsEnabled = true;
+
+                // 점수 내림차순 정렬된 인덱스 리스트 생성
+                var sortedIndices = result.Scores
+                                          .Select((s, i) => new { Score = s, Index = i })
+                                          .OrderByDescending(x => x.Score)
+                                          .ToList();
+
+                foreach (var item in sortedIndices)
+                {
+                    var cbi = new ComboBoxItem
+                    {
+                        Content = $"Mask {item.Index + 1} ({item.Score:P1})",
+                        Tag = item.Index
+                    };
+                    CboMaskCandidates.Items.Add(cbi);
+                }
+
+                // 현재 보여지고 있는 BestIndex를 콤보박스에서도 선택 상태로 만듦
+                // (이벤트 핸들러 내에서 이미지 생성을 또 하지 않도록 방어)
+                for (int i = 0; i < CboMaskCandidates.Items.Count; i++)
+                {
+                    if (CboMaskCandidates.Items[i] is ComboBoxItem item &&
+                        (int)item.Tag == result.BestIndex)
+                    {
+                        CboMaskCandidates.SelectedIndex = i;
+                        break;
+                    }
+                }
+
+                // BestIndex가 없을 경우(거의 없음) 0번 선택
+                if (CboMaskCandidates.SelectedIndex < 0)
+                    CboMaskCandidates.SelectedIndex = 0;
+
+                _isUpdatingCombo = false;
+
+                TxtStatus.Text = "Done.";
             }
-            TxtStatus.Text = "Done.";
         }
         catch (Exception ex)
         {
             MessageBox.Show(ex.ToString());
+        }
+    }
+
+    private async void CboMaskCandidates_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // 콤보박스 자동 세팅 중일 땐 이미지 생성 스킵
+        if (_isUpdatingCombo) return;
+
+        if (CboMaskCandidates.SelectedItem is not ComboBoxItem selectedItem) return;
+        if (selectedItem.Tag is not int maskIndex) return;
+
+        TxtStatus.Text = "Rendering Mask...";
+
+        // 사용자가 직접 변경했을 때만 지연 생성 수행
+        byte[] maskBytes = await Task.Run(() => _segmenter.GetMaskImage(maskIndex));
+
+        if (maskBytes.Length > 0)
+        {
+            var maskBmp = BytesToBitmap(maskBytes);
+            ImgMask.Source = NormalizeDpi96(maskBmp);
+            TxtStatus.Text = $"Selected: {selectedItem.Content}";
         }
     }
 
@@ -218,6 +291,10 @@ public partial class SamView : UserControl, IDisposable
         ImgMask.Source = null;
         PointOverlay.Children.Clear();
         _lastClickRatio = null;
+
+        CboMaskCandidates.Items.Clear();
+        CboMaskCandidates.IsEnabled = false;
+
         TxtStatus.Text = "Mask cleared.";
     }
 
