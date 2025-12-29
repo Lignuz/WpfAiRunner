@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfAiRunner", "WpfAiRunner\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepthEngine", "DepthEngine\DepthEngine.csproj", "{7B6217E9-0A75-4043-842F-9A9B93A5372A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SamEngine", "SamEngine\SamEngine.csproj", "{CE4C9C5F-A676-41DE-B581-17FC4BF58434}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -22,10 +24,14 @@ Global
 		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Debug|x64.Build.0 = Debug|x64
 		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Release|x64.ActiveCfg = Release|x64
 		{F474CBBC-00D2-7154-29B6-9CC2E09ED291}.Release|x64.Build.0 = Release|x64
-		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Debug|x64.Build.0 = Debug|Any CPU
-		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Release|x64.ActiveCfg = Release|Any CPU
-		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Release|x64.Build.0 = Release|Any CPU
+		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Debug|x64.ActiveCfg = Debug|x64
+		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Debug|x64.Build.0 = Debug|x64
+		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Release|x64.ActiveCfg = Release|x64
+		{7B6217E9-0A75-4043-842F-9A9B93A5372A}.Release|x64.Build.0 = Release|x64
+		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Debug|x64.ActiveCfg = Debug|x64
+		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Debug|x64.Build.0 = Debug|x64
+		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Release|x64.ActiveCfg = Release|x64
+		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

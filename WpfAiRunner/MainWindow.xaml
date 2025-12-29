@@ -51,6 +51,9 @@
                 <RadioButton Content="📏 Depth Anything" Style="{StaticResource MenuButtonStyle}" 
                              Click="Menu_Click" Tag="Depth"/>
 
+                <RadioButton Content="✂️ MobileSAM" Style="{StaticResource MenuButtonStyle}" 
+                             Click="Menu_Click" Tag="Sam"/>
+
                 <RadioButton Content="✂️ SAM 2 (Coming Soon)" Style="{StaticResource MenuButtonStyle}" 
                              IsEnabled="False" Opacity="0.5"/>
 

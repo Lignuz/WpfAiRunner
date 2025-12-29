@@ -29,6 +29,7 @@ public partial class MainWindow : Window
                 "Home" => new Views.WelcomeView(),
                 "Lama" => new Views.LamaView(),
                 "Depth" => new Views.DepthView(),
+                "Sam" => new Views.SamView(),
                 _ => new Views.WelcomeView()
             };
         }
