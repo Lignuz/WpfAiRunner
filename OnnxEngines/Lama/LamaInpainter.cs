@@ -3,8 +3,9 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using OnnxEngines.Utils;
 
-namespace LamaEngine;
+namespace OnnxEngines.Lama;
 
 public class LamaInpainter : IDisposable
 {
@@ -14,74 +15,24 @@ public class LamaInpainter : IDisposable
 
     public LamaInpainter(string modelPath, bool useGpu = false)
     {
-        using var so = new SessionOptions
-        {
-            // 1. 기본 설정 (CPU 기준)
-            // NOTE: ORT_ENABLE_BASIC is conservative and tends to be stable across many models.
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
-            IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount - 1),
-            InterOpNumThreads = 1
-        };
+        // OnnxHelper를 사용하여 세션 로드 및 디바이스 모드 설정
+        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
 
-        if (useGpu)
+        // GPU 모드일 경우 웜업 실행
+        if (DeviceMode == "GPU")
         {
-            // 2. GPU 가속 시도 
             try
             {
-                // CUDA(0번 GPU) 사용을 시도합니다.
-                // 주의: GPU 패키지가 설치되어 있고, 드라이버가 깔려 있어야 성공합니다.
-                so.AppendExecutionProvider_CUDA(0);
-                DeviceMode = "GPU (CUDA)";
+                var dummyImage = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+                var dummyMask = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
+                var inputs = new List<NamedOnnxValue>
+                {
+                    NamedOnnxValue.CreateFromTensor("image", dummyImage),
+                    NamedOnnxValue.CreateFromTensor("mask", dummyMask)
+                };
+                using var results = _session.Run(inputs);
             }
-            catch (Exception)
-            {
-                // 3. 실패 시 조용히 넘어감 (Fallback)
-                // 여기에 도달했다는 것은:
-                // - NVIDIA 그래픽카드가 없거나
-                // - CUDA 드라이버가 설치되지 않았거나
-                // - 호환되지 않는 GPU임
-                // => 이 경우 SessionOptions는 기본값(CPU) 상태를 유지합니다.
-                System.Diagnostics.Debug.WriteLine("GPU Acceleration failed. Switching to CPU.");
-                DeviceMode = "CPU (Fallback)";
-            }
-        }
-        else
-        {
-            DeviceMode = "CPU";
-        }
-
-        // 4. 세션 생성 (GPU가 성공했으면 GPU로, 실패했으면 CPU로 로드됨)
-        _session = new InferenceSession(modelPath, so);
-
-        if (DeviceMode.Contains("GPU"))
-        {
-            RunWarmup();
-        }
-    }
-
-    private void RunWarmup()
-    {
-        try
-        {
-            // 1. 가짜 데이터 생성 (512x512, 0으로 채움)
-            // ImageSharp를 쓰지 않고 텐서를 직접 만들어서 빠르게 처리
-            var dummyImage = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-            var dummyMask = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
-
-            var inputs = new List<NamedOnnxValue>
-        {
-            NamedOnnxValue.CreateFromTensor("image", dummyImage),
-            NamedOnnxValue.CreateFromTensor("mask", dummyMask)
-        };
-
-            // 2. 추론 실행 (결과는 버림)
-            // 이 과정에서 GPU 초기화, 메모리 할당, 커널 컴파일이 모두 완료됨
-            using var results = _session.Run(inputs);
-        }
-        catch (Exception ex)
-        {
-            // 웜업 실패는 무시해도 됨 (실제 실행 때 다시 시도할 테니)
-            System.Diagnostics.Debug.WriteLine($"Warmup failed: {ex.Message}");
+            catch { }
         }
     }
 
@@ -90,7 +41,7 @@ public class LamaInpainter : IDisposable
         using var src = Image.Load<Rgba32>(imageBytes);
         using var mask = Image.Load<L8>(maskBytes);
 
-        // If mask is empty -> no-op (return original image).
+        // 마스크가 없으면 원본 그대로 반환
         if (!HasAnyMask(mask))
         {
             using var msNoop = new MemoryStream();
@@ -98,19 +49,21 @@ public class LamaInpainter : IDisposable
             return msNoop.ToArray();
         }
 
+        // 1. 마스크 영역(ROI) 계산 및 정사각형 보정
         var roi = GetMaskBoundingBox(mask);
         roi = AdjustRoiToSquare(roi, src.Width, src.Height);
 
+        // 2. ROI 크롭
         using var srcCrop = src.Clone(ctx => ctx.Crop(roi));
         using var maskCrop = mask.Clone(ctx => ctx.Crop(roi));
 
-        using var src512 = srcCrop.Clone(ctx => ctx.Resize(ModelSize, ModelSize, KnownResamplers.Bicubic));
-        using var mask512 = maskCrop.Clone(ctx => ctx.Resize(ModelSize, ModelSize, KnownResamplers.NearestNeighbor));
+        // 3. 추론 (512x512 리사이즈 및 복원은 내부에서 처리)
+        using var out512 = RunInference(srcCrop, maskCrop);
 
-        using var out512 = RunInference(src512, mask512);
-
+        // 4. 결과물을 원래 ROI 크기로 복원
         out512.Mutate(ctx => ctx.Resize(roi.Width, roi.Height, KnownResamplers.Bicubic));
 
+        // 5. 원본 이미지의 해당 위치에 덮어쓰기 (Inpainting 적용)
         src.Mutate(ctx => ctx.DrawImage(out512, new Point(roi.X, roi.Y), 1f));
 
         using var ms = new MemoryStream();
@@ -120,28 +73,34 @@ public class LamaInpainter : IDisposable
 
     private Image<Rgba32> RunInference(Image<Rgba32> img, Image<L8> mask)
     {
+        // TensorHelper를 사용하여 텐서 변환
+        var imgTensor = img.ToTensor(ModelSize, ModelSize); // 0~1 정규화 포함
+        var maskTensor = mask.ToMaskTensor(ModelSize, ModelSize); // 마스크 변환 포함
+
         var inputs = new List<NamedOnnxValue>
         {
-            NamedOnnxValue.CreateFromTensor("image", MakeImageTensor(img)),
-            NamedOnnxValue.CreateFromTensor("mask", MakeMaskTensor(mask))
+            NamedOnnxValue.CreateFromTensor("image", imgTensor),
+            NamedOnnxValue.CreateFromTensor("mask", maskTensor)
         };
 
         using var results = _session.Run(inputs);
         var outputTensor = results.First().AsTensor<float>();
 
+        // 후처리 (텐서 -> 이미지 변환, Auto Scale 적용)
         return TensorToImageAuto(outputTensor);
     }
 
-    
+    // --- Helper Methods ---
+
     private bool HasAnyMask(Image<L8> mask)
     {
         bool any = false;
         mask.ProcessPixelRows(accessor =>
         {
-            for (int y = 0; y < mask.Height && !any; y++)
+            for (int y = 0; y < accessor.Height && !any; y++)
             {
                 var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < mask.Width; x++)
+                for (int x = 0; x < accessor.Width; x++)
                 {
                     if (row[x].PackedValue > 127)
                     {
@@ -161,10 +120,10 @@ public class LamaInpainter : IDisposable
 
         mask.ProcessPixelRows(accessor =>
         {
-            for (int y = 0; y < mask.Height; y++)
+            for (int y = 0; y < accessor.Height; y++)
             {
                 var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < mask.Width; x++)
+                for (int x = 0; x < accessor.Width; x++)
                 {
                     if (row[x].PackedValue > 127)
                     {
@@ -188,13 +147,14 @@ public class LamaInpainter : IDisposable
         int cy = roi.Y + roi.Height / 2;
 
         int size = Math.Max(roi.Width, roi.Height);
-        size = (int)(size * 2.0); // Context 확보
+        size = (int)(size * 2.0); // Context 확보를 위해 2배 확장
         size = Math.Max(size, 512);
 
         int half = size / 2;
         int x = cx - half;
         int y = cy - half;
 
+        // 이미지 경계 벗어나지 않도록 보정
         if (x < 0) x = 0;
         if (y < 0) y = 0;
         if (x + size > imgW) x = imgW - size;
@@ -204,43 +164,8 @@ public class LamaInpainter : IDisposable
         return new Rectangle(x, y, size, size);
     }
 
-    private DenseTensor<float> MakeImageTensor(Image<Rgba32> img)
-    {
-        var t = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-        img.ProcessPixelRows(a =>
-        {
-            for (int y = 0; y < ModelSize; y++)
-            {
-                var row = a.GetRowSpan(y);
-                for (int x = 0; x < ModelSize; x++)
-                {
-                    t[0, 0, y, x] = row[x].R / 255f;
-                    t[0, 1, y, x] = row[x].G / 255f;
-                    t[0, 2, y, x] = row[x].B / 255f;
-                }
-            }
-        });
-        return t;
-    }
+    // --- Post-Processing Logic (Lama 모델 특성상 출력 스케일 자동 보정 필요) ---
 
-    private DenseTensor<float> MakeMaskTensor(Image<L8> mask)
-    {
-        var t = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
-        mask.ProcessPixelRows(a =>
-        {
-            for (int y = 0; y < ModelSize; y++)
-            {
-                var row = a.GetRowSpan(y);
-                for (int x = 0; x < ModelSize; x++)
-                {
-                    t[0, 0, y, x] = row[x].PackedValue > 127 ? 1f : 0f;
-                }
-            }
-        });
-        return t;
-    }
-
-    // --- Auto Scale Logic (흰색 화면 방지) ---
     private Image<Rgba32> TensorToImageAuto(Tensor<float> outTensor)
     {
         var (minV, maxV) = SampleMinMax(outTensor);
@@ -261,11 +186,10 @@ public class LamaInpainter : IDisposable
                 var row = accessor.GetRowSpan(y);
                 for (int x = 0; x < ModelSize; x++)
                 {
-                    // NCHW
                     float r = outTensor[0, 0, y, x];
                     float g = outTensor[0, 1, y, x];
                     float b = outTensor[0, 2, y, x];
-                    
+
                     row[x] = new Rgba32(
                         ToByte(r, scale, to01_mul),
                         ToByte(g, scale, to01_mul),
@@ -283,7 +207,7 @@ public class LamaInpainter : IDisposable
         if (t is DenseTensor<float> dt)
         {
             var span = dt.Buffer.Span;
-            int step = Math.Max(1, span.Length / 1000);
+            int step = Math.Max(1, span.Length / 1000); // 1000개 샘플링
             float minV = float.PositiveInfinity;
             float maxV = float.NegativeInfinity;
             for (int i = 0; i < span.Length; i += step)

@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
-using DepthEngine;
+using OnnxEngines.Depth;
 
 namespace WpfAiRunner.Views;
 

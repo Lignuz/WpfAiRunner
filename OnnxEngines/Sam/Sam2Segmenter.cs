@@ -3,37 +3,33 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
-using System.Collections.Concurrent;
+using OnnxEngines.Utils;
+using SamEngine;
 
-namespace SamEngine;
+namespace OnnxEngines.Sam;
 
-// [수정] ISamSegmenter 인터페이스 구현
+// ISamSegmenter 인터페이스 구현
 public class Sam2Segmenter : ISamSegmenter
 {
     private InferenceSession? _encoderSession;
     private InferenceSession? _decoderSession;
-
     private const int TargetSize = 1024;
-
     private List<NamedOnnxValue>? _encoderResults;
-
     private int _orgW, _orgH;
     private int _resizedW, _resizedH;
     private Tensor<float>? _lastMaskTensor;
+
+    // SAM2용 정규화 값
+    private readonly float[] _mean = new[] { 123.675f, 116.28f, 103.53f };
+    private readonly float[] _std = new[] { 58.395f, 57.12f, 57.375f };
 
     public string DeviceMode { get; private set; } = "CPU";
 
     public void LoadModels(string encoderPath, string decoderPath, bool useGpu)
     {
-        var so = new SessionOptions();
-        if (useGpu)
-        {
-            try { so.AppendExecutionProvider_CUDA(0); DeviceMode = "GPU"; }
-            catch { DeviceMode = "CPU"; }
-        }
-
-        _encoderSession = new InferenceSession(encoderPath, so);
-        _decoderSession = new InferenceSession(decoderPath, so);
+        // OnnxHelper 사용
+        (_encoderSession, DeviceMode) = OnnxHelper.LoadSession(encoderPath, useGpu);
+        (_decoderSession, _) = OnnxHelper.LoadSession(decoderPath, useGpu);
     }
 
     public void EncodeImage(byte[] imageBytes)
@@ -53,9 +49,10 @@ public class Sam2Segmenter : ISamSegmenter
         paddedImage.Mutate(x => x.BackgroundColor(Color.Black));
         paddedImage.Mutate(x => x.DrawImage(image, new Point(0, 0), 1f));
 
-        var inputTensor = CreateEncoderInputTensor(paddedImage);
-        string inputName = _encoderSession.InputMetadata.Keys.First();
+        // TensorHelper 사용 (Mean/Std 포함)
+        var inputTensor = paddedImage.ToTensor(TargetSize, TargetSize, _mean, _std);
 
+        string inputName = _encoderSession.InputMetadata.Keys.First();
         var results = _encoderSession.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, inputTensor) });
 
         _encoderResults = new List<NamedOnnxValue>();
@@ -94,18 +91,14 @@ public class Sam2Segmenter : ISamSegmenter
         inputs.Add(NamedOnnxValue.CreateFromTensor("has_mask_input", hasMaskInput));
 
         using var decResults = _decoderSession.Run(inputs);
-
         var maskResult = decResults.FirstOrDefault(r => r.Name == "masks") ?? decResults.First();
         var iouResult = decResults.FirstOrDefault(r => r.Name == "iou_predictions");
-
         _lastMaskTensor = maskResult.AsTensor<float>().ToDenseTensor();
 
         var iouTensor = iouResult?.AsTensor<float>();
         var scores = new List<float>();
-        int bestIndex = 0;
-        float maxScore = -1f;
+        int bestIndex = 0; float maxScore = -1f;
         int candidateCount = _lastMaskTensor.Dimensions[1];
-
         for (int i = 0; i < candidateCount; i++)
         {
             float rawScore = iouTensor != null ? iouTensor[0, i] : 0.0f;
@@ -114,7 +107,6 @@ public class Sam2Segmenter : ISamSegmenter
             scores.Add(rawScore);
             if (rawScore > maxScore) { maxScore = rawScore; bestIndex = i; }
         }
-
         byte[] bestMaskBytes = MaskTensorToPng(_lastMaskTensor, bestIndex);
         return (scores, bestMaskBytes, bestIndex);
     }
@@ -125,34 +117,10 @@ public class Sam2Segmenter : ISamSegmenter
         return MaskTensorToPng(_lastMaskTensor, index);
     }
 
-    private DenseTensor<float> CreateEncoderInputTensor(Image<Rgba32> img1024)
-    {
-        const int H = 1024;
-        const int W = 1024;
-        var tensor = new DenseTensor<float>(new[] { 1, 3, H, W });
-
-        img1024.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < H; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < W; x++)
-                {
-                    var p = row[x];
-                    tensor[0, 0, y, x] = (p.R - 123.675f) / 58.395f;
-                    tensor[0, 1, y, x] = (p.G - 116.28f) / 57.12f;
-                    tensor[0, 2, y, x] = (p.B - 103.53f) / 57.375f;
-                }
-            }
-        });
-        return tensor;
-    }
-
     private byte[] MaskTensorToPng(Tensor<float> maskTensor, int maskIndex)
     {
         int h = 256, w = 256;
         using var rawMask = new Image<L8>(w, h);
-
         rawMask.ProcessPixelRows(accessor =>
         {
             for (int y = 0; y < h; y++)
@@ -166,22 +134,12 @@ public class Sam2Segmenter : ISamSegmenter
                 }
             }
         });
-
         double ratioW = (double)_resizedW / TargetSize;
         double ratioH = (double)_resizedH / TargetSize;
-        int validW = (int)(w * ratioW);
-        int validH = (int)(h * ratioH);
-        validW = Math.Clamp(validW, 1, w);
-        validH = Math.Clamp(validH, 1, h);
-
+        int validW = (int)(w * ratioW); int validH = (int)(h * ratioH);
+        validW = Math.Clamp(validW, 1, w); validH = Math.Clamp(validH, 1, h);
         rawMask.Mutate(x => x.Crop(new Rectangle(0, 0, validW, validH)));
-        rawMask.Mutate(x => x.Resize(new ResizeOptions
-        {
-            Size = new Size(_orgW, _orgH),
-            Mode = ResizeMode.Stretch,
-            Sampler = KnownResamplers.Bicubic
-        }));
-
+        rawMask.Mutate(x => x.Resize(new ResizeOptions { Size = new Size(_orgW, _orgH), Mode = ResizeMode.Stretch, Sampler = KnownResamplers.Bicubic }));
         using var ms = new MemoryStream();
         rawMask.SaveAsPng(ms);
         return ms.ToArray();

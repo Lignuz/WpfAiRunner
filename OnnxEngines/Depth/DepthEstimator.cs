@@ -3,94 +3,42 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using OnnxEngines.Utils;
 
-namespace DepthEngine;
+namespace OnnxEngines.Depth;
 
 public class DepthEstimator : IDisposable
 {
     private readonly InferenceSession _session;
-    private const int ModelSize = 518; // Depth Anything V2
+    private const int ModelSize = 518;
     public string DeviceMode { get; private set; } = "CPU";
 
     public DepthEstimator(string modelPath, bool useGpu = false)
     {
-        using var so = new SessionOptions
-        {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_BASIC,
-        };
+        // OnnxHelper 사용
+        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
 
-        if (useGpu)
+        if (DeviceMode.Contains("GPU"))
         {
             try
             {
-                so.AppendExecutionProvider_CUDA(0);
-                DeviceMode = "GPU (CUDA)";
+                // Warm-up
+                var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+                string inputName = _session.InputMetadata.Keys.First();
+                using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
             }
-            catch
-            {
-                DeviceMode = "CPU (Fallback)";
-            }
-        }
-
-        _session = new InferenceSession(modelPath, so);
-
-        // ▼▼▼ [추가] GPU 모드일 경우 미리 한 번 돌려서 예열(Warm-up) ▼▼▼
-        if (DeviceMode.Contains("GPU"))
-        {
-            RunWarmup();
-        }
-    }
-
-    // ▼▼▼ [추가] 웜업 메서드 ▼▼▼
-    private void RunWarmup()
-    {
-        try
-        {
-            // 가짜 데이터 생성 (1, 3, 518, 518)
-            var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-
-            // 입력 이름 찾기
-            string inputName = "image";
-            if (_session.InputMetadata.Count > 0)
-                inputName = _session.InputMetadata.Keys.First();
-
-            var inputs = new List<NamedOnnxValue>
-            {
-                NamedOnnxValue.CreateFromTensor(inputName, dummyTensor)
-            };
-
-            // 추론 실행 (결과는 버림) - 이때 GPU 초기화 완료됨
-            using var results = _session.Run(inputs);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Warmup failed: {ex.Message}");
+            catch { }
         }
     }
 
     public byte[] ProcessImage(byte[] imageBytes)
     {
-        // (기존 코드와 동일)
         using var src = Image.Load<Rgba32>(imageBytes);
         int origW = src.Width;
         int origH = src.Height;
 
-        using var inputImg = src.Clone(ctx => ctx.Resize(ModelSize, ModelSize));
-
-        var inputTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-        inputImg.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < ModelSize; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < ModelSize; x++)
-                {
-                    inputTensor[0, 0, y, x] = row[x].R / 255f;
-                    inputTensor[0, 1, y, x] = row[x].G / 255f;
-                    inputTensor[0, 2, y, x] = row[x].B / 255f;
-                }
-            }
-        });
+        // TensorHelper 사용 (리사이즈 + 정규화 통합 처리)
+        var inputTensor = src.ToTensor(ModelSize, ModelSize);
 
         var inputs = new List<NamedOnnxValue>
         {
@@ -116,7 +64,6 @@ public class DepthEstimator : IDisposable
 
     private Image<L8> TensorToGrayscale(Tensor<float> tensor, int w, int h)
     {
-        // (기존 코드와 동일)
         float min = float.MaxValue;
         float max = float.MinValue;
 
