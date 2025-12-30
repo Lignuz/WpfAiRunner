@@ -13,10 +13,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\DepthEngine\DepthEngine.csproj" />
-		<ProjectReference Include="..\LamaEngine\LamaEngine.csproj" />
-		<ProjectReference Include="..\SamEngine\SamEngine.csproj" />
-		<ProjectReference Include="..\UpscalingEngine\UpscalingEngine.csproj" />
+	  <ProjectReference Include="..\OnnxEngines\OnnxEngines.csproj" />
 	</ItemGroup>
 
 </Project>
