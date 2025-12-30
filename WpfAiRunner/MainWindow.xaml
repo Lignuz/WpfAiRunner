@@ -54,6 +54,9 @@
                 <RadioButton Content="✂️ Segment Anything (SAM)" Style="{StaticResource MenuButtonStyle}" 
                              Click="Menu_Click" Tag="Sam"/>
 
+                <RadioButton Content="🔍 Real-ESRGAN (x4)" Style="{StaticResource MenuButtonStyle}" 
+                             Click="Menu_Click" Tag="Esrgan"/>
+
                 <RadioButton Content="🎨 Stable Diffusion (Coming Soon)" Style="{StaticResource MenuButtonStyle}" 
                              IsEnabled="False" Opacity="0.5"/>
             </StackPanel>

@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DepthEngine", "DepthEngine\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SamEngine", "SamEngine\SamEngine.csproj", "{CE4C9C5F-A676-41DE-B581-17FC4BF58434}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "UpscalingEngine", "UpscalingEngine\UpscalingEngine.csproj", "{82CA5FEB-D80B-4796-87A3-2757D3A094D7}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -32,6 +34,10 @@ Global
 		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Debug|x64.Build.0 = Debug|x64
 		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Release|x64.ActiveCfg = Release|x64
 		{CE4C9C5F-A676-41DE-B581-17FC4BF58434}.Release|x64.Build.0 = Release|x64
+		{82CA5FEB-D80B-4796-87A3-2757D3A094D7}.Debug|x64.ActiveCfg = Debug|x64
+		{82CA5FEB-D80B-4796-87A3-2757D3A094D7}.Debug|x64.Build.0 = Debug|x64
+		{82CA5FEB-D80B-4796-87A3-2757D3A094D7}.Release|x64.ActiveCfg = Release|x64
+		{82CA5FEB-D80B-4796-87A3-2757D3A094D7}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

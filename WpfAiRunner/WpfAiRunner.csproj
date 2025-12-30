@@ -16,6 +16,7 @@
 		<ProjectReference Include="..\DepthEngine\DepthEngine.csproj" />
 		<ProjectReference Include="..\LamaEngine\LamaEngine.csproj" />
 		<ProjectReference Include="..\SamEngine\SamEngine.csproj" />
+		<ProjectReference Include="..\UpscalingEngine\UpscalingEngine.csproj" />
 	</ItemGroup>
 
 </Project>
