@@ -30,6 +30,16 @@
                           Click="ChkUseGpu_Click"/>
 
                 <Button x:Name="BtnOpenImage" Content="Open Image" Click="BtnOpenImage_Click"/>
+
+                <TextBlock Text="Style:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#CCC"/>
+                <ComboBox x:Name="CboStyle" Width="100" SelectedIndex="0" VerticalAlignment="Center" Margin="0,0,10,0" SelectionChanged="CboStyle_SelectionChanged">
+                    <ComboBoxItem Content="Inferno"/>
+                    <ComboBoxItem Content="Magma"/>
+                    <ComboBoxItem Content="Plasma"/>
+                    <ComboBoxItem Content="Viridis"/>
+                    <ComboBoxItem Content="Grayscale"/>
+                </ComboBox>
+                
                 <Button x:Name="BtnRun" Content="Estimate Depth" Click="BtnRun_Click" IsEnabled="False"/>
 
                 <TextBlock x:Name="TxtStatus" Foreground="#9CDCFE" VerticalAlignment="Center" Margin="15,0,0,0" Text="Ready."/>

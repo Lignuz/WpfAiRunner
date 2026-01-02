@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using Microsoft.Win32;
 using OnnxEngines.Depth;
+using OnnxEngines.Utils;
 
 namespace WpfAiRunner.Views;
 
@@ -13,6 +14,9 @@ public partial class DepthView : UserControl, IDisposable
     private BitmapSource? _inputBitmap;
     private string? _modelPath; // 현재 모델 경로 기억
     private bool _busy;
+
+    // 모델 추론이 완료되었는지 확인하는 플래그
+    private bool _hasInferenceResult = false;
 
     public DepthView() => InitializeComponent();
 
@@ -65,6 +69,10 @@ public partial class DepthView : UserControl, IDisposable
 
             _modelPath = path;
 
+            // 모델 변경으로 기존 추론 결과 무효화
+            _hasInferenceResult = false;
+            ImgOutput.Source = null; 
+
             // UI 업데이트: 모델 이름 + 현재 모드(CPU/GPU) 표시
             TxtModel.Text = Path.GetFileName(path);
             TxtStatus.Text = $"Loaded on {_estimator.DeviceMode}";
@@ -100,6 +108,7 @@ public partial class DepthView : UserControl, IDisposable
         _inputBitmap = bmp;
         ImgInput.Source = bmp;
         ImgOutput.Source = null;
+        _hasInferenceResult = false;
 
         TxtStatus.Text = "Image loaded.";
         UpdateButtons();
@@ -116,9 +125,13 @@ public partial class DepthView : UserControl, IDisposable
         {
             byte[] inputBytes = BitmapToBytes(_inputBitmap);
 
-            byte[] outBytes = await Task.Run(() => _estimator.ProcessImage(inputBytes));
+            // 1. 추론 실행 (결과 캐싱됨)
+            await Task.Run(() => _estimator.RunInference(inputBytes));
+            _hasInferenceResult = true;
 
-            ImgOutput.Source = BytesToBitmap(outBytes);
+            // 2. 현재 스타일로 이미지 생성
+            await UpdateResultImage();
+
             TxtStatus.Text = "Done.";
         }
         catch (Exception ex)
@@ -130,6 +143,46 @@ public partial class DepthView : UserControl, IDisposable
         {
             SetBusy(false);
             GC.Collect();
+        }
+    }
+
+    private async void CboStyle_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // 추론된 결과가 없으면 아무것도 안 함
+        if (!_hasInferenceResult) return;
+
+        // UI 멈춤 방지를 위해 비동기로 처리
+        SetBusy(true);
+        await UpdateResultImage();
+        SetBusy(false);
+    }
+
+    // 결과 이미지 업데이트 메서드
+    private async Task UpdateResultImage()
+    {
+        if (!_hasInferenceResult) return;
+        if (_estimator == null || _inputBitmap == null) return;
+
+        try
+        {
+            var style = (ColormapStyle)CboStyle.SelectedIndex;
+
+            // 캐시된 텐서에서 이미지만 추출
+            byte[] resultBytes = await Task.Run(() => _estimator.GetDepthMap(style));
+
+            using var ms = new MemoryStream(resultBytes);
+            var resultBmp = new BitmapImage();
+            resultBmp.BeginInit();
+            resultBmp.StreamSource = ms;
+            resultBmp.CacheOption = BitmapCacheOption.OnLoad;
+            resultBmp.EndInit();
+            resultBmp.Freeze();
+
+            ImgOutput.Source = resultBmp;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Style update failed: {ex.Message}");
         }
     }
 

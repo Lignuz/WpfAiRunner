@@ -11,6 +11,11 @@ public class DepthEstimator : IDisposable
 {
     private readonly InferenceSession _session;
     private const int ModelSize = 518;
+
+    // 마지막 추론 결과를 저장할 변수 (캐시)
+    private Tensor<float>? _lastOutputTensor;
+    private int _lastOrigW, _lastOrigH;
+
     public string DeviceMode { get; private set; } = "CPU";
 
     public DepthEstimator(string modelPath, bool useGpu = false)
@@ -31,11 +36,12 @@ public class DepthEstimator : IDisposable
         }
     }
 
-    public byte[] ProcessImage(byte[] imageBytes)
+    // 1단계: 추론만 수행 (Heavy)
+    public void RunInference(byte[] imageBytes)
     {
         using var src = Image.Load<Rgba32>(imageBytes);
-        int origW = src.Width;
-        int origH = src.Height;
+        _lastOrigW = src.Width;
+        _lastOrigH = src.Height;
 
         // TensorHelper 사용 (리사이즈 + 정규화 통합 처리)
         var inputTensor = src.ToTensor(ModelSize, ModelSize);
@@ -52,17 +58,30 @@ public class DepthEstimator : IDisposable
         }
 
         using var results = _session.Run(inputs);
-        var outputTensor = results.First().AsTensor<float>();
+        var outputRaw = results.First().AsTensor<float>();
 
-        using var outputImg = TensorToGrayscale(outputTensor, ModelSize, ModelSize);
-        outputImg.Mutate(ctx => ctx.Resize(origW, origH));
+        // 결과를 캐시 변수에 깊은 복사(ToDenseTensor)로 저장
+        _lastOutputTensor = outputRaw.ToDenseTensor();
+    }
+
+    // 2단계: 저장된 결과로 스타일만 적용 (Light)
+    public byte[] GetDepthMap(ColormapStyle style)
+    {
+        if (_lastOutputTensor == null)
+            throw new InvalidOperationException("Inference has not been run yet.");
+
+        // 캐시된 텐서를 사용하여 이미지 생성
+        using var outputImg = TensorToColorMap(_lastOutputTensor, ModelSize, ModelSize, style);
+
+        // 원본 크기 복원
+        outputImg.Mutate(ctx => ctx.Resize(_lastOrigW, _lastOrigH));
 
         using var ms = new MemoryStream();
         outputImg.SaveAsPng(ms);
         return ms.ToArray();
     }
 
-    private Image<L8> TensorToGrayscale(Tensor<float> tensor, int w, int h)
+    private Image<Rgba32> TensorToColorMap(Tensor<float> tensor, int w, int h, ColormapStyle style)
     {
         float min = float.MaxValue;
         float max = float.MinValue;
@@ -76,7 +95,7 @@ public class DepthEstimator : IDisposable
         float range = max - min;
         if (range < 0.00001f) range = 1f;
 
-        var img = new Image<L8>(w, h);
+        var img = new Image<Rgba32>(w, h);
         img.ProcessPixelRows(accessor =>
         {
             for (int y = 0; y < h; y++)
@@ -86,7 +105,7 @@ public class DepthEstimator : IDisposable
                 {
                     float val = tensor[0, y, x];
                     float norm = (val - min) / range;
-                    row[x] = new L8((byte)(norm * 255f));
+                    row[x] = ColorMapper.GetColor(norm, style);
                 }
             }
         });
