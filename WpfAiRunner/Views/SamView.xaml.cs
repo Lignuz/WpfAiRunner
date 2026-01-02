@@ -24,6 +24,10 @@ public partial class SamView : UserControl, IDisposable
     // 콤보박스 업데이트 중인지 체크하는 플래그
     private bool _isUpdatingCombo;
 
+    // 재로딩을 위해 현재 로드된 모델 경로 기억
+    private string? _currentEncoderPath;
+    private string? _currentDecoderPath;
+
     public SamView()
     {
         InitializeComponent();
@@ -40,8 +44,10 @@ public partial class SamView : UserControl, IDisposable
         // 1. 현재 선택된 모델 타입 확인
         int modelTypeIndex = CboModelType.SelectedIndex; // 0: MobileSAM, 1: SAM 2
 
-        // 2. 엔진 교체
+        // 2. 엔진 교체 (경로 선택 전에 미리 인스턴스 준비)
+        // 기존 세그멘터 정리
         _segmenter.Dispose();
+
         if (modelTypeIndex == 0) _segmenter = new SamSegmenter();
         else _segmenter = new Sam2Segmenter();
 
@@ -102,20 +108,58 @@ public partial class SamView : UserControl, IDisposable
             decoderPath = dlg2.FileName;
         }
 
+        // 공통 로딩 함수 호출
+        await LoadModelsInternal(encoderPath, decoderPath);
+    }
+
+    // GPU 체크박스 클릭 시 모델 재로딩
+    private async void ChkUseGpu_Click(object sender, RoutedEventArgs e)
+    {
+        // 로드된 모델이 없으면 무시
+        if (!_isModelLoaded || string.IsNullOrEmpty(_currentEncoderPath) || string.IsNullOrEmpty(_currentDecoderPath))
+            return;
+
+        // 현재 기억된 경로로 다시 로딩
+        await LoadModelsInternal(_currentEncoderPath, _currentDecoderPath);
+    }
+
+    // 모델 로딩 내부 로직 (중복 제거 및 경로 저장)
+    private async Task LoadModelsInternal(string encoderPath, string decoderPath)
+    {
         SetBusy(true, "Loading models...");
         try
         {
             bool useGpu = ChkUseGpu.IsChecked == true;
             await Task.Run(() => _segmenter.LoadModels(encoderPath, decoderPath, useGpu));
 
+            // 성공 시 경로 저장
+            _currentEncoderPath = encoderPath;
+            _currentDecoderPath = decoderPath;
             _isModelLoaded = true;
+
             TxtStatus.Text = $"{CboModelType.Text} Loaded ({_segmenter.DeviceMode})";
             BtnOpenImage.IsEnabled = true;
+
+            // GPU 실패 시 UI 동기화 (Fallback 알림)
+            if (useGpu && _segmenter.DeviceMode.Contains("CPU"))
+            {
+                ChkUseGpu.IsChecked = false;
+                MessageBox.Show("GPU init failed. Fallback to CPU.", "Info", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
+            // 이미 이미지가 열려있다면, 인코더(디바이스)가 바뀌었으므로 다시 인코딩해야 함
+            if (_inputBitmap != null)
+            {
+                await EncodeCurrentInput();
+            }
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Error loading {CboModelType.Text}:\n{ex.Message}\n\nCheck if you selected the correct model files.");
+            MessageBox.Show($"Error loading models:\n{ex.Message}\n\nCheck if you selected the correct model files.");
             _isModelLoaded = false;
+            // 실패 시 경로 초기화
+            _currentEncoderPath = null;
+            _currentDecoderPath = null;
         }
         finally
         {
@@ -145,16 +189,25 @@ public partial class SamView : UserControl, IDisposable
         ImgMask.Source = null;
         PointOverlay.Children.Clear();
         _lastClickRatio = null;
-        _isImageEncoded = false;
-        TxtOverlay.Visibility = Visibility.Visible;
 
         // UI 초기화
         CboMaskCandidates.Items.Clear();
         CboMaskCandidates.IsEnabled = false;
+        TxtOverlay.Visibility = Visibility.Visible;
+
+        // 인코딩 실행
+        await EncodeCurrentInput();
+    }
+
+    // 현재 입력 이미지 인코딩 (GPU 변경 시 재사용)
+    private async Task EncodeCurrentInput()
+    {
+        if (_inputBitmap == null || !_isModelLoaded) return;
 
         SetBusy(true, "Encoding...");
         try
         {
+            _isImageEncoded = false;
             byte[] bytes = BitmapToPngBytes(_inputBitmap);
             await Task.Run(() => _segmenter.EncodeImage(bytes));
 
@@ -166,7 +219,7 @@ public partial class SamView : UserControl, IDisposable
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.ToString());
+            MessageBox.Show($"Encoding failed: {ex.Message}");
         }
         finally
         {
@@ -361,6 +414,7 @@ public partial class SamView : UserControl, IDisposable
     {
         PbarLoading.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
         BtnLoadModels.IsEnabled = !busy;
+        ChkUseGpu.IsEnabled = !busy; // 로딩 중 클릭 방지
         BtnOpenImage.IsEnabled = !busy && _isModelLoaded;
         BtnReset.IsEnabled = !busy && _isModelLoaded;
         ImgInput.IsEnabled = !busy; // 처리 중 클릭 방지

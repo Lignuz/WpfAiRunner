@@ -1,48 +1,53 @@
 ﻿<UserControl x:Class="WpfAiRunner.Views.RealEsrganView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Grid>
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource BgDark}">
+
+    <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Margin="10">
-            <StackPanel Orientation="Horizontal">
-                <Button x:Name="BtnLoadModel" Content="Load Model (x4)" Width="120" Margin="0,0,10,0" Click="BtnLoadModel_Click"/>
+        <Border Grid.Row="0" Background="{StaticResource BgCard}" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="BtnLoadModel" Content="📂 Load Model (x4)" Click="BtnLoadModel_Click"/>
 
-                <CheckBox x:Name="ChkUseGpu" Content="Use GPU" VerticalAlignment="Center" Margin="0,0,10,0" 
-                          Click="ChkUseGpu_Click"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
 
-                <Button x:Name="BtnOpenImage" Content="Open Image" Width="100" Margin="0,0,10,0" IsEnabled="False" Click="BtnOpenImage_Click"/>
-                <Button x:Name="BtnUpscale" Content="Upscale (x4)" Width="100" Margin="0,0,10,0" IsEnabled="False" Click="BtnUpscale_Click"/>
+                    <Button x:Name="BtnOpenImage" Content="🖼️ Open Image" IsEnabled="False" Click="BtnOpenImage_Click"/>
 
-                <Button x:Name="BtnSave" Content="Save Image" Width="100" Margin="0,0,10,0" IsEnabled="False" Click="BtnSave_Click"/>
-            </StackPanel>
+                    <Button x:Name="BtnUpscale" Content="✨ Upscale (x4)" Style="{StaticResource BtnPrimary}" 
+                            IsEnabled="False" Click="BtnUpscale_Click" Width="120"/>
 
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <ProgressBar x:Name="PbarUpscale" Width="150" Height="15" Margin="0,0,10,0" Visibility="Hidden"/>
-                <TextBlock x:Name="TxtStatus" Text="Ready" VerticalAlignment="Center" Foreground="#AAA"/>
-            </StackPanel>
-        </DockPanel>
+                    <Button x:Name="BtnSave" Content="💾 Save Image" IsEnabled="False" Click="BtnSave_Click"/>
+                </StackPanel>
 
-        <Grid Grid.Row="1" Margin="10">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <ProgressBar x:Name="PbarUpscale" Width="150" Height="15" Margin="0,0,10,0" Visibility="Hidden"/>
+                    <TextBlock x:Name="TxtStatus" Text="Ready" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" BorderBrush="#333" BorderThickness="1" Margin="0,0,5,0">
+            <Border Grid.Column="0" Style="{StaticResource CardBorder}">
                 <Grid>
                     <Image x:Name="ImgInput" Stretch="Uniform"/>
-                    <TextBlock Text="Original" Foreground="White" Background="#88000000" VerticalAlignment="Top" HorizontalAlignment="Left" Padding="5"/>
+                    <TextBlock Text="Original" Foreground="#88FFFFFF" Margin="10" VerticalAlignment="Top" HorizontalAlignment="Left" FontWeight="Bold"/>
                 </Grid>
             </Border>
 
-            <Border Grid.Column="1" BorderBrush="#333" BorderThickness="1" Margin="5,0,0,0">
+            <Border Grid.Column="1" Style="{StaticResource CardBorder}">
                 <Grid>
                     <Image x:Name="ImgOutput" Stretch="Uniform"/>
-                    <TextBlock Text="Real-ESRGAN x4" Foreground="White" Background="#88000000" VerticalAlignment="Top" HorizontalAlignment="Left" Padding="5"/>
+                    <TextBlock Text="Real-ESRGAN x4" Foreground="#88FFFFFF" Margin="10" VerticalAlignment="Top" HorizontalAlignment="Left" FontWeight="Bold"/>
                 </Grid>
             </Border>
         </Grid>

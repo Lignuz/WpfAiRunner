@@ -4,79 +4,62 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
+             d:DesignHeight="450" d:DesignWidth="800"
+             Background="{StaticResource BgDark}">
 
-    <UserControl.Resources>
-        <DrawingBrush x:Key="CheckerboardBrush" TileMode="Tile" Viewport="0,0,20,20" ViewportUnits="Absolute">
-            <DrawingBrush.Drawing>
-                <DrawingGroup>
-                    <GeometryDrawing Brush="#FFFFFF">
-                        <GeometryDrawing.Geometry>
-                            <RectangleGeometry Rect="0,0,20,20" />
-                        </GeometryDrawing.Geometry>
-                    </GeometryDrawing>
-                    <GeometryDrawing Brush="#CCCCCC">
-                        <GeometryDrawing.Geometry>
-                            <GeometryGroup>
-                                <RectangleGeometry Rect="0,0,10,10" />
-                                <RectangleGeometry Rect="10,10,10,10" />
-                            </GeometryGroup>
-                        </GeometryDrawing.Geometry>
-                    </GeometryDrawing>
-                </DrawingGroup>
-            </DrawingBrush.Drawing>
-        </DrawingBrush>
-    </UserControl.Resources>
-
-    <Grid>
+    <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <DockPanel Grid.Row="0" Margin="10">
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                <Button x:Name="BtnLoadModel" Content="Load RMBG-1.4" Width="120" Margin="0,0,10,0" Click="BtnLoadModel_Click"/>
-                <CheckBox x:Name="ChkUseGpu" Content="Use GPU" VerticalAlignment="Center" Margin="0,0,10,0" Click="ChkUseGpu_Click"/>
-                <Button x:Name="BtnOpenImage" Content="Open Image" Width="100" Margin="0,0,10,0" IsEnabled="False" Click="BtnOpenImage_Click"/>
-                <Button x:Name="BtnRun" Content="Run" Width="80" Margin="0,0,10,0" IsEnabled="False" Click="BtnRun_Click"/>
-                <Button x:Name="BtnSave" Content="Save" Width="80" Margin="0,0,10,0" IsEnabled="False" Click="BtnSave_Click"/>
-            </StackPanel>
+        <Border Grid.Row="0" Background="{StaticResource BgCard}" CornerRadius="8" Padding="10" Margin="0,0,0,10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="BtnLoadModel" Content="📂 Load RMBG-1.4" Click="BtnLoadModel_Click"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
 
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="Threshold:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#CCC"/>
-                <Slider x:Name="SldThreshold" Width="150" Minimum="0" Maximum="1" Value="0" SmallChange="0.1" LargeChange="0.2" VerticalAlignment="Center" Margin="0,0,20,0"/>
+                    <Button x:Name="BtnOpenImage" Content="🖼️ Open Image" IsEnabled="False" Click="BtnOpenImage_Click"/>
 
-                <TextBlock Text="Background:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="#CCC"/>
-                <ComboBox x:Name="CboBackground" Width="100" SelectedIndex="0" VerticalAlignment="Center">
-                    <ComboBoxItem Content="Transparent"/>
-                    <ComboBoxItem Content="White"/>
-                    <ComboBoxItem Content="Black"/>
-                    <ComboBoxItem Content="Green (Chroma)"/>
-                    <ComboBoxItem Content="Blue"/>
-                </ComboBox>
-            </StackPanel>
+                    <Button x:Name="BtnRun" Content="✨ Run" Style="{StaticResource BtnPrimary}" IsEnabled="False" Click="BtnRun_Click" Width="80"/>
+                    <Button x:Name="BtnSave" Content="💾 Save" IsEnabled="False" Click="BtnSave_Click"/>
+                </StackPanel>
 
-            <TextBlock x:Name="TxtStatus" Text="Ready" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#AAA"/>
-        </DockPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Threshold:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{StaticResource TextSecondary}"/>
+                    <Slider x:Name="SldThreshold" Width="150" Minimum="0" Maximum="1" Value="0" SmallChange="0.1" LargeChange="0.2" VerticalAlignment="Center" Margin="0,0,20,0"/>
 
-        <Grid Grid.Row="1" Margin="10">
+                    <TextBlock Text="Background:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{StaticResource TextSecondary}"/>
+                    <ComboBox x:Name="CboBackground" Width="120" SelectedIndex="0" VerticalAlignment="Center">
+                        <ComboBoxItem Content="Transparent"/>
+                        <ComboBoxItem Content="White"/>
+                        <ComboBoxItem Content="Black"/>
+                        <ComboBoxItem Content="Green (Chroma)"/>
+                        <ComboBoxItem Content="Blue"/>
+                    </ComboBox>
+                </StackPanel>
+
+                <TextBlock x:Name="TxtStatus" Text="Ready" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}"/>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <Border Grid.Column="0" BorderBrush="#333" BorderThickness="1" Margin="0,0,5,0">
+            <Border Grid.Column="0" Style="{StaticResource CardBorder}">
                 <Grid>
                     <Image x:Name="ImgInput" Stretch="Uniform"/>
-                    <TextBlock Text="Original" Foreground="White" Background="#88000000" VerticalAlignment="Top" HorizontalAlignment="Left" Padding="5"/>
+                    <TextBlock Text="Original" Foreground="#88FFFFFF" Margin="10" VerticalAlignment="Top" HorizontalAlignment="Left" FontWeight="Bold"/>
                 </Grid>
             </Border>
 
-            <Border Grid.Column="1" BorderBrush="#333" BorderThickness="1" Margin="5,0,0,0" Background="{StaticResource CheckerboardBrush}">
+            <Border Grid.Column="1" Style="{StaticResource CardBorder}" Background="{StaticResource CheckerboardBrush}">
                 <Grid>
                     <Image x:Name="ImgOutput" Stretch="Uniform"/>
-                    <TextBlock Text="Background Removed" Foreground="White" Background="#88000000" VerticalAlignment="Top" HorizontalAlignment="Left" Padding="5"/>
+                    <TextBlock Text="Background Removed" Foreground="#88FFFFFF" Margin="10" VerticalAlignment="Top" HorizontalAlignment="Left" FontWeight="Bold"/>
                 </Grid>
             </Border>
         </Grid>
