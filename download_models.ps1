@@ -102,7 +102,8 @@ $models = @(
 	@{ Name = "AnimeGANv2_Hayao.onnx";    Url = "https://huggingface.co/vumichien/AnimeGANv2_Hayao/resolve/main/AnimeGANv2_Hayao.onnx?download=true" },
     @{ Name = "AnimeGANv2_Shinkai.onnx";  Url = "https://huggingface.co/vumichien/AnimeGANv2_Shinkai/resolve/main/AnimeGANv2_Shinkai.onnx?download=true" },
     @{ Name = "AnimeGANv2_Paprika.onnx";  Url = "https://huggingface.co/vumichien/AnimeGANv2_Paprika/resolve/main/AnimeGANv2_Paprika.onnx?download=true" },
-	@{ Name = "ddcolor.onnx";             Url = "https://huggingface.co/crj/dl-ws/resolve/main/ddcolor.onnx?download=true" }
+	@{ Name = "ddcolor.onnx";             Url = "https://huggingface.co/crj/dl-ws/resolve/main/ddcolor.onnx?download=true" },
+	@{ Name = "stable-diffusion-v1-5-Q8_0.gguf";             Url = "https://huggingface.co/gpustack/stable-diffusion-v1-5-GGUF/resolve/main/stable-diffusion-v1-5-Q8_0.gguf" }
 )
 
 # 메인 루프

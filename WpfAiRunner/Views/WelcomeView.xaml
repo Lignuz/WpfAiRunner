@@ -4,7 +4,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800"
+             d:DesignHeight="600" d:DesignWidth="800"
              Background="{StaticResource BgDark}">
 
     <Grid>
@@ -27,17 +27,25 @@
                                FontSize="16" Foreground="{StaticResource TextSecondary}" 
                                HorizontalAlignment="Center" Margin="0,0,0,15"/>
 
-                    <StackPanel HorizontalAlignment="Center">
-                        <TextBlock Text="• LaMa Inpainting (Object Removal)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
-                        <TextBlock Text="• Depth Anything V2 (Depth Map)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
-                        <TextBlock Text="• Segment Anything (MobileSAM / SAM 2)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
-                        <TextBlock Text="• Real-ESRGAN (x4 Super Resolution)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
-                        <TextBlock Text="• RMBG-1.4 (Background Removal)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
-                    </StackPanel>
+                    <UniformGrid Columns="2" HorizontalAlignment="Center">
+                        <StackPanel Margin="10,0">
+                            <TextBlock Text="• LaMa Inpainting" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• Depth Anything V2" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• Segment Anything (SAM)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• Real-ESRGAN (Upscale)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• RMBG-1.4 (Remove BG)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                        </StackPanel>
+                        <StackPanel Margin="10,0">
+                            <TextBlock Text="• Face Privacy (Mosaic)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• AnimeGAN (Style Transfer)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• Image Colorization" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                            <TextBlock Text="• Stable Diffusion (GGUF)" Foreground="{StaticResource TextPrimary}" Margin="0,4"/>
+                        </StackPanel>
+                    </UniformGrid>
                 </StackPanel>
             </Border>
 
-            <TextBlock Text="Powered by ONNX Runtime &amp; CUDA" 
+            <TextBlock Text="Powered by ONNX Runtime, CUDA &amp; stable-diffusion.cpp (GGUF)" 
                        FontSize="12" Foreground="#666" 
                        HorizontalAlignment="Center" Margin="0,40,0,0"/>
         </StackPanel>

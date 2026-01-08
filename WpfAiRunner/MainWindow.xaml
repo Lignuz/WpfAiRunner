@@ -66,11 +66,11 @@
                 <RadioButton Content="🌸 AnimeGAN (Hayao)" Style="{StaticResource MenuButtonStyle}" 
                             Click="Menu_Click" Tag="Anime"/>
 
-                <RadioButton Content="🎨 Colorization" Style="{StaticResource MenuButtonStyle}" 
+                <RadioButton Content="🌈 Colorization" Style="{StaticResource MenuButtonStyle}" 
                             Click="Menu_Click" Tag="Color"/>
 
-                <RadioButton Content="🎨 Stable Diffusion (Coming Soon)" Style="{StaticResource MenuButtonStyle}" 
-                             IsEnabled="False" Opacity="0.5"/>
+                <RadioButton Content="✨ Stable Diffusion" Style="{StaticResource MenuButtonStyle}" 
+                            Click="Menu_Click" Tag="StableDiffusion"/>
             </StackPanel>
         </Border>
 

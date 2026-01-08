@@ -9,10 +9,10 @@
 		<NoWarn>$(NoWarn);NETSDK1206</NoWarn>
 	</PropertyGroup>
 
-	<ItemGroup>
-		<PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.15.1" />
-		<PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
-		<PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
-	</ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="HPPH.SkiaSharp" Version="1.0.0" />
+    <PackageReference Include="StableDiffusion.NET" Version="4.6.0" />
+    <PackageReference Include="StableDiffusion.NET.Backend.Cuda12.Windows" Version="4.6.0" />
+  </ItemGroup>
 
 </Project>

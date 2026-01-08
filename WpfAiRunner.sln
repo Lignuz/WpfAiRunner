@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WpfAiRunner", "WpfAiRunner\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OnnxEngines", "OnnxEngines\OnnxEngines.csproj", "{E6092C30-15EF-4E8B-BA8A-D4D72A0DC967}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SD1.5Engine", "SD1.5Engine\SD1.5Engine.csproj", "{33A43710-D959-D936-DDC7-561B6C3E35A4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -23,6 +25,10 @@ Global
 		{E6092C30-15EF-4E8B-BA8A-D4D72A0DC967}.Debug|x64.Build.0 = Debug|x64
 		{E6092C30-15EF-4E8B-BA8A-D4D72A0DC967}.Release|x64.ActiveCfg = Release|x64
 		{E6092C30-15EF-4E8B-BA8A-D4D72A0DC967}.Release|x64.Build.0 = Release|x64
+		{33A43710-D959-D936-DDC7-561B6C3E35A4}.Debug|x64.ActiveCfg = Debug|x64
+		{33A43710-D959-D936-DDC7-561B6C3E35A4}.Debug|x64.Build.0 = Debug|x64
+		{33A43710-D959-D936-DDC7-561B6C3E35A4}.Release|x64.ActiveCfg = Release|x64
+		{33A43710-D959-D936-DDC7-561B6C3E35A4}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
