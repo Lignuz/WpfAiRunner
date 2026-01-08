@@ -8,56 +8,169 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="{StaticResource BgCard}" CornerRadius="8" Padding="10" Margin="0,0,0,10" >
+        <!-- 상단 컨트롤 바 -->
+        <Border Grid.Row="0" Background="{StaticResource BgCard}" CornerRadius="8" Padding="10" Margin="0,0,0,10">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button x:Name="BtnPickModel" Content="📂 Model..." Click="BtnPickModel_Click"/>
-                    <TextBlock x:Name="TxtModel" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="5,0,15,0" Text="(no model)"/>
-                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU (Required)" IsEnabled="False" IsChecked="True" VerticalAlignment="Center"/>
-                    <Button x:Name="BtnRun" Content="▶ Generate" Style="{StaticResource BtnPrimary}" Click="BtnRun_Click" IsEnabled="False" Width="100" Margin="10,0,0,0"/>
+                    <TextBlock x:Name="TxtModel" Foreground="{StaticResource TextSecondary}" 
+                               VerticalAlignment="Center" Margin="5,0,15,0" Text="(no model)"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" IsEnabled="False" IsChecked="True" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnRun" Content="▶ Generate" Style="{StaticResource BtnPrimary}" 
+                            Click="BtnRun_Click" IsEnabled="False" Width="100" Margin="10,0,0,0"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center" Margin="10,0,0,0">
-                    <ProgressBar x:Name="PbarLoading" Width="100" Height="14" Minimum="0" Maximum="100" Visibility="Collapsed" Margin="0,0,10,0"/>
-                    <TextBlock x:Name="TxtStatus" Foreground="{StaticResource AccentColor}" VerticalAlignment="Center" Text="Ready."/>
+                    <ProgressBar x:Name="PbarLoading" Width="100" Height="14" Minimum="0" Maximum="100" 
+                                 Visibility="Collapsed" Margin="0,0,10,0"/>
+                    <TextBlock x:Name="TxtStatus" Foreground="{StaticResource AccentColor}" 
+                               VerticalAlignment="Center" Text="Ready."/>
                 </StackPanel>
             </DockPanel>
         </Border>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300"/>
+                <ColumnDefinition Width="280"/>
+                <ColumnDefinition Width="10"/>
+                <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="10"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
+            <!-- 좌측: 파라미터 패널 -->
             <Border Grid.Column="0" Style="{StaticResource CardBorder}" Padding="10">
-                <StackPanel>
-                    <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,5"/>
-                    <TextBox x:Name="TxtPrompt" Height="80" TextWrapping="Wrap" Background="{StaticResource BgInput}" Foreground="{StaticResource TextPrimary}" Text="a cute cat"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <!-- 모드 선택 -->
+                        <TextBlock Text="Mode" Foreground="{StaticResource TextPrimary}" 
+                                   Margin="0,0,0,5" FontWeight="Bold"/>
+                        <ComboBox x:Name="CmbMode" SelectionChanged="CmbMode_SelectionChanged" Margin="0,0,0,10">
+                            <ComboBoxItem Content="Text to Image" IsSelected="True" Tag="TextToImage"/>
+                            <ComboBoxItem Content="Image to Image" Tag="ImageToImage"/>
+                            <ComboBoxItem Content="Inpainting" Tag="Inpainting"/>
+                        </ComboBox>
 
-                    <TextBlock Text="Negative" Foreground="{StaticResource TextPrimary}" Margin="0,15,0,5"/>
-                    <TextBox x:Name="TxtNegative" Height="50" TextWrapping="Wrap" Background="{StaticResource BgInput}" Foreground="{StaticResource TextSecondary}"/>
-
-                    <UniformGrid Columns="2" Margin="0,15,0,0">
-                        <StackPanel Margin="0,0,5,0">
-                            <TextBlock Text="Steps" Foreground="{StaticResource TextSecondary}"/>
-                            <TextBox x:Name="TxtSteps" Text="20" Margin="0,5,0,0"/>
+                        <!-- 이미지 관리 버튼 -->
+                        <StackPanel x:Name="PanelImageButtons" Visibility="Collapsed" Margin="0,0,0,10">
+                            <Button x:Name="BtnLoadImage" Content="📁 Load Image" 
+                                    Click="BtnLoadImage_Click" Margin="0,0,0,5"/>
+                            <Button x:Name="BtnUseOutput" Content="⬅️ Use Output as Input" 
+                                    Click="BtnUseOutput_Click" IsEnabled="False" Margin="0,0,0,5"/>
+                            <Button x:Name="BtnClearMask" Content="🗑️ Clear Mask" 
+                                    Click="BtnClearMask_Click" Visibility="Collapsed"/>
                         </StackPanel>
-                        <StackPanel Margin="5,0,0,0">
-                            <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}"/>
-                            <TextBox x:Name="TxtSeed" Text="-1" Margin="0,5,0,0"/>
-                        </StackPanel>
-                    </UniformGrid>
 
-                    <TextBlock Text="CFG Scale" Foreground="{StaticResource TextSecondary}" Margin="0,15,0,5"/>
-                    <TextBox x:Name="TxtCfg" Text="7.5" Background="{StaticResource BgInput}"/>
-                </StackPanel>
+                        <!-- Inpainting 마스크 도구 -->
+                        <StackPanel x:Name="PanelMaskTools" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Text="Mask Tool" Foreground="{StaticResource TextPrimary}" 
+                                       Margin="0,0,0,5" FontSize="11" FontWeight="SemiBold"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                <RadioButton x:Name="RbRect" Content="Rectangle" GroupName="MaskMode" 
+                                             Margin="0,0,10,0" Checked="MaskMode_Checked"/>
+                                <RadioButton x:Name="RbBrush" Content="Brush" GroupName="MaskMode" 
+                                             Checked="MaskMode_Checked"/>
+                            </StackPanel>
+                            <StackPanel x:Name="PanelBrushSize" Visibility="Collapsed">
+                                <TextBlock Foreground="{StaticResource TextSecondary}" 
+                                           Margin="0,0,0,3" FontSize="10">
+                                    <Run Text="Brush Size:"/>
+                                    <Run x:Name="TxtBrushSizeDisplay" Text="24"/>
+                                </TextBlock>
+                                <Slider x:Name="SliderBrushSize" Minimum="4" Maximum="128" Value="24" 
+                                        TickFrequency="4" IsSnapToTickEnabled="False"
+                                        ValueChanged="SliderBrushSize_ValueChanged"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Img2Img / Inpainting Strength -->
+                        <StackPanel x:Name="PanelStrength" Visibility="Collapsed" Margin="0,0,0,10">
+                            <TextBlock Foreground="{StaticResource TextSecondary}">
+                                <Run Text="Strength:"/>
+                                <Run x:Name="TxtStrengthValue" Text="0.6"/>
+                            </TextBlock>
+                            <Slider x:Name="SliderStrength" Minimum="0" Maximum="1" Value="0.6" 
+                                    TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                    ValueChanged="SliderStrength_ValueChanged"/>
+                            <TextBlock Foreground="{StaticResource TextSecondary}" FontSize="9" TextWrapping="Wrap"
+                                       Text="0=Keep original, 1=Full change"/>
+                        </StackPanel>
+
+                        <!-- Prompt -->
+                        <TextBlock Text="Prompt" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,5"/>
+                        <TextBox x:Name="TxtPrompt" Height="80" TextWrapping="Wrap" 
+                                 Background="{StaticResource BgInput}" Foreground="{StaticResource TextPrimary}" 
+                                 Text="a cute cat" AcceptsReturn="True"/>
+
+                        <!-- Negative Prompt -->
+                        <TextBlock Text="Negative" Foreground="{StaticResource TextPrimary}" Margin="0,15,0,5"/>
+                        <TextBox x:Name="TxtNegative" Height="50" TextWrapping="Wrap" 
+                                 Background="{StaticResource BgInput}" Foreground="{StaticResource TextSecondary}"
+                                 AcceptsReturn="True"/>
+
+                        <!-- Steps & Seed -->
+                        <UniformGrid Columns="2" Margin="0,15,0,0">
+                            <StackPanel Margin="0,0,5,0">
+                                <TextBlock Text="Steps" Foreground="{StaticResource TextSecondary}"/>
+                                <TextBox x:Name="TxtSteps" Text="20" Margin="0,5,0,0"/>
+                            </StackPanel>
+                            <StackPanel Margin="5,0,0,0">
+                                <TextBlock Text="Seed" Foreground="{StaticResource TextSecondary}"/>
+                                <TextBox x:Name="TxtSeed" Text="-1" Margin="0,5,0,0"/>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <!-- CFG Scale -->
+                        <TextBlock Text="CFG Scale" Foreground="{StaticResource TextSecondary}" Margin="0,15,0,5"/>
+                        <TextBox x:Name="TxtCfg" Text="7.5" Background="{StaticResource BgInput}"/>
+                    </StackPanel>
+                </ScrollViewer>
             </Border>
 
+            <!-- 중앙: Input / Mask 패널 -->
             <Border Grid.Column="2" Style="{StaticResource CardBorder}">
                 <Grid>
-                    <Image x:Name="ImgOutput" Stretch="Uniform" SnapsToDevicePixels="True"/>
-                    <TextBlock x:Name="TxtPlaceholder" Text="Result will appear here" Foreground="{StaticResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Foreground="{StaticResource TextPrimary}" 
+                               FontSize="14" FontWeight="SemiBold" Text="Input / Mask" Margin="10,10,0,5"/>
+
+                    <Grid Grid.Row="1">
+                        <Image x:Name="ImgInput" Stretch="Uniform" SnapsToDevicePixels="True"/>
+                        <Image x:Name="ImgMaskPreview" Stretch="Uniform" Opacity="0.45" IsHitTestVisible="False"/>
+
+                        <!-- 마스크 그리기용 오버레이 -->
+                        <Canvas x:Name="CanvasMask" Background="Transparent"
+                                MouseEnter="CanvasMask_MouseEnter"
+                                MouseLeave="CanvasMask_MouseLeave"
+                                MouseLeftButtonDown="CanvasMask_MouseDown"
+                                MouseMove="CanvasMask_MouseMove"
+                                MouseLeftButtonUp="CanvasMask_MouseUp">
+                            <Ellipse x:Name="BrushCursor" Stroke="#FFD200" StrokeThickness="2"
+                                     Fill="Transparent" Visibility="Collapsed" IsHitTestVisible="False"/>
+                        </Canvas>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- 우측: Output 패널 -->
+            <Border Grid.Column="4" Style="{StaticResource CardBorder}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Foreground="{StaticResource TextPrimary}" 
+                               FontSize="14" FontWeight="SemiBold" Text="Output" Margin="10,10,0,5"/>
+                    <Grid Grid.Row="1">
+                        <Image x:Name="ImgOutput" Stretch="Uniform" SnapsToDevicePixels="True"/>
+                        <TextBlock x:Name="TxtPlaceholder" Text="Result will appear here" 
+                                   Foreground="{StaticResource TextSecondary}" 
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
