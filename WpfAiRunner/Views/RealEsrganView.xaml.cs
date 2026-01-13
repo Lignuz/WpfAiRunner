@@ -1,23 +1,30 @@
 ﻿using OnnxEngines.Upscaling;
 using OnnxEngines.Utils;
-using Microsoft.Win32;
-using System.IO;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media.Imaging;
 
 namespace WpfAiRunner.Views;
 
-public partial class RealEsrganView : UserControl, IDisposable
+public partial class RealEsrganView : BaseAiView 
 {
     private readonly RealEsrganEngine _engine = new();
-    private byte[]? _inputBytes;
     private string? _currentModelPath;
 
-    public RealEsrganView() => InitializeComponent();
-    public void Dispose() => _engine.Dispose();
+    // 부모에게 UI 컨트롤 연결
+    protected override Image ControlImgInput => ImgInput;
+    protected override Image? ControlImgOutput => ImgOutput;
+    protected override ProgressBar? ControlPbarLoading => PbarStatus; // 이름이 PbarStatus임에 주의
+    protected override TextBlock? ControlTxtStatus => TxtStatus;
 
-    private async void UserControl_Loaded(object sender, RoutedEventArgs e)
+    public RealEsrganView()
+    {
+        InitializeComponent();
+    }
+
+    public override void Dispose() => _engine.Dispose();
+
+    // 부모의 Loaded 이후 실행됨
+    protected override async void OnLoaded(RoutedEventArgs e)
     {
 #if DEBUG
         if (string.IsNullOrEmpty(_currentModelPath))
@@ -30,11 +37,18 @@ public partial class RealEsrganView : UserControl, IDisposable
             }
         }
 #endif
+        UpdateUi();
+    }
+
+    // 이미지가 로드될 때마다 호출됨
+    protected override void OnImageLoaded()
+    {
+        UpdateUi();
     }
 
     private async void BtnLoadModel_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "ONNX Model|*.onnx" };
+        var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "ONNX Model|*.onnx" };
         if (dlg.ShowDialog() != true) return;
 
         _currentModelPath = dlg.FileName;
@@ -51,134 +65,79 @@ public partial class RealEsrganView : UserControl, IDisposable
     {
         if (string.IsNullOrEmpty(_currentModelPath)) return;
 
-        SetBusy(true, "Loading Model..."); // 여기서는 Indeterminate(뱅글뱅글) 모드
+        SetBusyState(true);
         try
         {
             bool useGpu = ChkUseGpu.IsChecked == true;
             await Task.Run(() => _engine.LoadModel(_currentModelPath, useGpu));
 
-            TxtStatus.Text = $"Model Loaded ({_engine.DeviceMode})";
+            Log($"Model Loaded ({_engine.DeviceMode})");
             if (useGpu && _engine.DeviceMode.Contains("CPU"))
             {
                 ChkUseGpu.IsChecked = false;
             }
-
-            BtnOpenImage.IsEnabled = true;
-            if (_inputBytes != null) BtnUpscale.IsEnabled = true;
+            UpdateUi();
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Error loading model: {ex.Message}");
-            TxtStatus.Text = "Load Failed";
+            Log("Load Failed");
             _currentModelPath = null;
         }
         finally
         {
-            SetBusy(false);
+            SetBusyState(false);
         }
     }
 
-    private void BtnOpenImage_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new OpenFileDialog { Filter = "Images|*.png;*.jpg;*.jpeg" };
-        if (dlg.ShowDialog() != true) return;
+    // 부모 메서드 호출
+    private void BtnOpenImage_Click(object sender, RoutedEventArgs e) => OpenImageDialog();
 
-        var bmp = new BitmapImage(new Uri(dlg.FileName));
-        ImgInput.Source = bmp;
-
-        using var ms = new MemoryStream();
-        var enc = new PngBitmapEncoder();
-        enc.Frames.Add(BitmapFrame.Create(bmp));
-        enc.Save(ms);
-        _inputBytes = ms.ToArray();
-
-        BtnUpscale.IsEnabled = true;
-        BtnSave.IsEnabled = false;
-        ImgOutput.Source = null;
-        TxtStatus.Text = "Image Loaded.";
-    }
+    // 부모 메서드 호출
+    private void BtnSave_Click(object sender, RoutedEventArgs e) => SaveOutputImage("upscaled.png");
 
     private async void BtnUpscale_Click(object sender, RoutedEventArgs e)
     {
-        if (_inputBytes == null) return;
+        if (_inputBitmap == null) return;
 
-        SetBusy(true, "Upscaling... 0%");
-
-        // 작업 모드로 전환: 퍼센트 표시를 위해 Indeterminate 끄기
-        PbarStatus.IsIndeterminate = false;
-        PbarStatus.Value = 0;
+        SetBusyState(true);
+        // 업스케일링은 진행률 표시가 필요하므로 Indeterminate 끄기
+        if (ControlPbarLoading != null)
+        {
+            ControlPbarLoading.IsIndeterminate = false;
+            ControlPbarLoading.Value = 0;
+        }
 
         var progress = new Progress<double>(p =>
         {
-            PbarStatus.Value = p * 100;
-            TxtStatus.Text = $"Upscaling... {(int)(p * 100)}%";
+            if (ControlPbarLoading != null) ControlPbarLoading.Value = p * 100;
+            Log($"Upscaling... {(int)(p * 100)}%");
         });
 
         try
         {
-            byte[] resultBytes = await Task.Run(() => _engine.Upscale(_inputBytes, progress));
+            // 부모의 헬퍼를 사용해 바이트 변환
+            byte[] inputBytes = BitmapToBytes(_inputBitmap);
+            byte[] resultBytes = await Task.Run(() => _engine.Upscale(inputBytes, progress));
 
-            using var ms = new MemoryStream(resultBytes);
-            var resultBmp = new BitmapImage();
-            resultBmp.BeginInit();
-            resultBmp.StreamSource = ms;
-            resultBmp.CacheOption = BitmapCacheOption.OnLoad;
-            resultBmp.EndInit();
-            resultBmp.Freeze();
-
-            ImgOutput.Source = resultBmp;
-            BtnSave.IsEnabled = true;
-            TxtStatus.Text = "Done.";
+            ImgOutput.Source = BytesToBitmap(resultBytes);
+            Log("Done.");
         }
         catch (Exception ex)
         {
             MessageBox.Show($"Error: {ex.Message}");
-            TxtStatus.Text = "Failed.";
+            Log("Failed.");
         }
         finally
         {
-            SetBusy(false);
+            SetBusyState(false);
         }
     }
 
-    private void BtnSave_Click(object sender, RoutedEventArgs e)
+    private void UpdateUi()
     {
-        if (ImgOutput.Source is not BitmapSource resultBmp) return;
-
-        var dlg = new SaveFileDialog { Filter = "PNG Image|*.png", FileName = "upscaled.png" };
-        if (dlg.ShowDialog() != true) return;
-
-        try
-        {
-            using var fileStream = new FileStream(dlg.FileName, FileMode.Create);
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(resultBmp));
-            encoder.Save(fileStream);
-            MessageBox.Show("Saved!", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show($"Failed to save: {ex.Message}");
-        }
-    }
-
-    private void SetBusy(bool busy, string? statusMsg = null)
-    {
-        PbarStatus.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-
-        // 기본값은 Indeterminate (로딩용)
-        // Upscale 버튼 클릭 시에만 수동으로 false로 바꿉니다.
-        if (busy) PbarStatus.IsIndeterminate = true;
-
-        BtnLoadModel.IsEnabled = !busy;
-        ChkUseGpu.IsEnabled = !busy;
-        BtnOpenImage.IsEnabled = !busy && !string.IsNullOrEmpty(_currentModelPath);
-        BtnUpscale.IsEnabled = !busy && _inputBytes != null && !string.IsNullOrEmpty(_currentModelPath);
-        BtnSave.IsEnabled = !busy && ImgOutput.Source != null;
-
-        if (statusMsg != null)
-        {
-            TxtStatus.Text = statusMsg;
-        }
+        BtnOpenImage.IsEnabled = true;
+        BtnUpscale.IsEnabled = _inputBitmap != null && !string.IsNullOrEmpty(_currentModelPath);
+        BtnSave.IsEnabled = ImgOutput.Source != null;
     }
 }

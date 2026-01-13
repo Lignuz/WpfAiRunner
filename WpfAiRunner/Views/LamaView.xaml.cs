@@ -11,11 +11,11 @@ using OnnxEngines.Utils;
 
 namespace WpfAiRunner.Views;
 
-public partial class LamaView : UserControl, IDisposable
+public partial class LamaView : BaseAiView
 {
     private LamaInpainter? _inpainter;
-    private BitmapSource? _inputBitmap;
     private string? _modelPath;
+    private BitmapSource? _outputBitmap; // 결과물 보관용 변수 
 
     private byte[]? _maskGray8;
     private int _maskW;
@@ -23,30 +23,28 @@ public partial class LamaView : UserControl, IDisposable
 
     private enum MaskMode { Rect, Brush }
     private MaskMode _maskMode = MaskMode.Rect;
-
     private bool _dragging;
     private Point _dragStart;
     private Rectangle? _rectVisual;
-
     private bool _painting;
     private int _brushRadiusPx = 12;
-
     private bool _uiReady;
     private bool _busy;
     private bool _overlayHover;
+
+    protected override Image ControlImgInput => ImgInput;
+    protected override Image? ControlImgOutput => ImgOutput;
+    protected override ProgressBar? ControlPbarLoading => PbarLoading;
+    protected override TextBlock? ControlTxtStatus => TxtStatus;
 
     public LamaView()
     {
         InitializeComponent();
     }
 
-    // 화면이 닫힐 때 엔진 정리 (중요!)
-    public void Dispose()
-    {
-        _inpainter?.Dispose();
-    }
+    public override void Dispose() => _inpainter?.Dispose();
 
-    private async void UserControl_Loaded(object sender, RoutedEventArgs e)
+    protected override async void OnLoaded(RoutedEventArgs e)
     {
         rbRect.Checked += MaskMode_Checked;
         rbBrush.Checked += MaskMode_Checked;
@@ -54,366 +52,188 @@ public partial class LamaView : UserControl, IDisposable
         TxtBrushSize.TextChanged += TxtBrushSize_TextChanged;
 
         rbRect.IsChecked = true;
-        rbBrush.IsChecked = false;
-
         _uiReady = true;
         UpdateBrushUi();
         UpdateButtons();
-        SetStatus("Ready.");
+        Log("Ready.");
 
 #if DEBUG
         if (_inpainter == null && string.IsNullOrEmpty(_modelPath))
         {
             string? debugPath = OnnxHelper.FindModelInDebug("lama_fp32.onnx");
-            if (debugPath != null)
-            {
-                await ReloadModelAsync(debugPath);
-            }
+            if (debugPath != null) await ReloadModelAsync(debugPath);
         }
 #endif
     }
 
+    protected override void OnImageLoaded()
+    {
+        EnsureMaskBufferForInput();
+        ClearMaskInternal();
+        UpdateButtons();
+    }
+
     private async void ChkUseGpu_Click(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrEmpty(_modelPath))
-        {
-            await ReloadModelAsync(_modelPath);
-        }
+        if (!string.IsNullOrEmpty(_modelPath)) await ReloadModelAsync(_modelPath);
     }
 
     private async void BtnPickModel_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog
-        {
-            Filter = "ONNX model (*.onnx)|*.onnx|All files (*.*)|*.*"
-        };
-
-        // UserControl에서는 Owner로 Window를 찾아줘야 안전함
+        var dlg = new OpenFileDialog { Filter = "ONNX model (*.onnx)|*.onnx" };
         if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
-
         await ReloadModelAsync(dlg.FileName);
     }
 
     private async Task ReloadModelAsync(string path)
     {
-        SetBusy(true, "Loading model...");
-        await Task.Delay(10);
-
+        SetBusy(true);
         try
         {
             bool useGpu = ChkUseGpu.IsChecked == true;
             _inpainter?.Dispose();
-            _inpainter = null;
-
             _inpainter = await Task.Run(() => new LamaInpainter(path, useGpu));
-
             _modelPath = path;
             TxtModel.Text = System.IO.Path.GetFileName(_modelPath);
-            SetStatus($"Model loaded on {_inpainter.DeviceMode}.");
+            Log($"Model loaded on {_inpainter.DeviceMode}.");
 
-            if (useGpu && _inpainter.DeviceMode.Contains("CPU"))
-            {
-                ChkUseGpu.IsChecked = false;
-                MessageBox.Show("GPU init failed. Fallback to CPU.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
-            }
+            if (useGpu && _inpainter.DeviceMode.Contains("CPU")) ChkUseGpu.IsChecked = false;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.ToString(), "Model load failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.ToString());
             _inpainter = null;
             TxtModel.Text = "(no model)";
-            SetStatus("Model load failed.");
+            Log("Model load failed.");
         }
         finally
         {
-            SetBusy(false, null);
+            SetBusy(false);
             UpdateButtons();
-
-            // 로딩하며 생긴 임시 쓰레기 청소
-            GC.Collect();
-            GC.WaitForPendingFinalizers();
         }
     }
 
-    private void BtnOpenImage_Click(object sender, RoutedEventArgs e)
+    private void BtnOpenImage_Click(object sender, RoutedEventArgs e) => OpenImageDialog();
+
+    // 결과물을 입력으로 사용
+    private void BtnUseOutput_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog
-        {
-            Filter = "Image (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp|All files (*.*)|*.*"
-        };
+        if (_outputBitmap == null) return;
 
-        if (dlg.ShowDialog(Window.GetWindow(this)) != true) return;
+        // 1. 입력을 결과물로 교체
+        _inputBitmap = _outputBitmap;
+        ImgInput.Source = _inputBitmap;
 
-        try
-        {
-            var bmp = new BitmapImage();
-            bmp.BeginInit();
-            bmp.CacheOption = BitmapCacheOption.OnLoad;
-            bmp.UriSource = new Uri(dlg.FileName);
-            bmp.EndInit();
-            bmp.Freeze();
+        // 2. 다른 뷰와 공유하기 위해 업데이트
+        BaseAiView.SharedImage = _inputBitmap;
 
-            _inputBitmap = bmp;
-            ImgInput.Source = _inputBitmap;
+        // 3. 마스크 초기화 (새 이미지이므로)
+        EnsureMaskBufferForInput();
+        ClearMaskInternal();
 
-            EnsureMaskBufferForInput();
-            ClearMaskInternal();
-
-            SetStatus("Image loaded.");
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.ToString(), "Open image failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-
-        UpdateButtons();
+        Log("Output image set as input.");
     }
 
     private async void BtnRun_Click(object sender, RoutedEventArgs e)
     {
         if (_inpainter == null || _inputBitmap == null || _maskGray8 == null) return;
-        if (!HasAnyMask()) { SetStatus("No mask."); return; }
+        if (!HasAnyMask()) { Log("No mask."); return; }
 
         SetBusy(true, "Running inference...");
-
         try
         {
-            byte[] inputPng = BitmapToPngBytes(_inputBitmap);
+            byte[] inputPng = BitmapToBytes(_inputBitmap);
             byte[] maskPng = Gray8MaskToPngBytes(_maskGray8, _maskW, _maskH);
-
             byte[] outPng = await Task.Run(() => _inpainter!.ProcessImage(inputPng, maskPng));
 
-            ImgOutput.Source = BytesToBitmap(outPng);
-            SetStatus("Done.");
+            // 결과물 표시 및 보관
+            _outputBitmap = BytesToBitmap(outPng);
+            ImgOutput.Source = _outputBitmap;
+
+            Log("Done.");
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.ToString(), "Inference failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            SetStatus("Inference failed.");
+            MessageBox.Show(ex.ToString());
+            Log("Inference failed.");
         }
         finally
         {
-            SetBusy(false, null);
-
-            // 이미지 변환하며 생긴 큰 쓰레기들 청소
+            SetBusy(false);
             GC.Collect();
-            GC.WaitForPendingFinalizers();
         }
-
         UpdateButtons();
     }
 
     private void BtnClearMask_Click(object sender, RoutedEventArgs e)
     {
-        if (_inputBitmap == null) return;
         ClearMaskInternal();
         UpdateButtons();
-        SetStatus("Mask cleared.");
+        Log("Mask cleared.");
     }
 
-    // --- Mask Mode & UI ---
+    // --- Mask UI Logic ---
     void MaskMode_Checked(object sender, RoutedEventArgs e)
     {
-        if (!_uiReady || rbBrush == null || rbRect == null) return;
+        if (!_uiReady) return;
         _maskMode = (rbBrush.IsChecked == true) ? MaskMode.Brush : MaskMode.Rect;
         UpdateBrushUi();
     }
-
     void UpdateBrushUi()
     {
-        if (!_uiReady || rbBrush == null) return;
+        if (!_uiReady) return;
         bool brush = (rbBrush.IsChecked == true);
-
         TxtBrushSizeLabel.Opacity = brush ? 1.0 : 0.4;
         SlBrushSize.IsEnabled = brush && !_busy;
         TxtBrushSize.IsEnabled = brush && !_busy;
-
         int size = Clamp((int)Math.Round(SlBrushSize.Value), 4, 256);
         _brushRadiusPx = Math.Max(1, size / 2);
-        if (TxtBrushSize.Text != size.ToString()) TxtBrushSize.Text = size.ToString();
         UpdateBrushCursorVisual(null);
     }
-
-    private void SlBrushSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (!_uiReady) return;
-        int size = Clamp((int)Math.Round(SlBrushSize.Value), 4, 256);
-        _brushRadiusPx = Math.Max(1, size / 2);
-        if (TxtBrushSize.Text != size.ToString()) TxtBrushSize.Text = size.ToString();
-        UpdateBrushCursorVisual(null);
-    }
-
+    private void SlBrushSize_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e) => UpdateBrushUi();
     private void TxtBrushSize_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_uiReady) return;
-        if (int.TryParse(TxtBrushSize.Text, out int size))
-        {
-            size = Clamp(size, 4, 256);
-            SlBrushSize.Value = size;
-            _brushRadiusPx = Math.Max(1, size / 2);
-        }
-        UpdateBrushCursorVisual(null);
+        if (int.TryParse(TxtBrushSize.Text, out int size)) SlBrushSize.Value = size;
     }
 
-    // --- Overlay Interaction ---
-    private void Overlay_MouseEnter(object sender, MouseEventArgs e)
-    {
-        _overlayHover = true;
-        UpdateBrushCursorVisual(e.GetPosition(Overlay));
-    }
-
-    private void Overlay_MouseLeave(object sender, MouseEventArgs e)
-    {
-        _overlayHover = false;
-        UpdateBrushCursorVisual(null);
-    }
-
+    // --- Mouse Interaction ---
+    private void Overlay_MouseEnter(object sender, MouseEventArgs e) { _overlayHover = true; UpdateBrushCursorVisual(e.GetPosition(Overlay)); }
+    private void Overlay_MouseLeave(object sender, MouseEventArgs e) { _overlayHover = false; UpdateBrushCursorVisual(null); }
     private void Overlay_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (_busy || _inputBitmap == null) return;
         Overlay.CaptureMouse();
-
-        if (_maskMode == MaskMode.Rect)
-        {
-            _dragging = true;
-            _dragStart = e.GetPosition(Overlay);
-            if (_rectVisual == null)
-            {
-                _rectVisual = new Rectangle
-                {
-                    Stroke = Brushes.Cyan,
-                    StrokeThickness = 2,
-                    Fill = Brushes.Transparent,
-                    StrokeDashArray = new DoubleCollection { 3, 2 }
-                };
-                Overlay.Children.Add(_rectVisual);
-            }
-            Canvas.SetLeft(_rectVisual, _dragStart.X);
-            Canvas.SetTop(_rectVisual, _dragStart.Y);
-            _rectVisual.Width = 0; _rectVisual.Height = 0;
-        }
-        else
-        {
-            _painting = true;
-            PaintBrushAt(e.GetPosition(Overlay));
-        }
+        if (_maskMode == MaskMode.Rect) { _dragging = true; _dragStart = e.GetPosition(Overlay); StartRectVisual(); }
+        else { _painting = true; PaintBrushAt(e.GetPosition(Overlay)); }
     }
-
     private void Overlay_MouseMove(object sender, MouseEventArgs e)
     {
         if (_inputBitmap == null) return;
         var pt = e.GetPosition(Overlay);
-
-        if (_maskMode == MaskMode.Rect && _dragging && _rectVisual != null)
-        {
-            UpdateRectVisual(_dragStart, pt);
-        }
-        else if (_maskMode == MaskMode.Brush)
-        {
-            UpdateBrushCursorVisual(pt);
-            if (_painting && e.LeftButton == MouseButtonState.Pressed && !_busy)
-                PaintBrushAt(pt);
-        }
+        if (_maskMode == MaskMode.Rect && _dragging && _rectVisual != null) UpdateRectVisual(_dragStart, pt);
+        else if (_maskMode == MaskMode.Brush) { UpdateBrushCursorVisual(pt); if (_painting && e.LeftButton == MouseButtonState.Pressed && !_busy) PaintBrushAt(pt); }
     }
-
     private void Overlay_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (_busy || _inputBitmap == null) return;
         Overlay.ReleaseMouseCapture();
-
-        if (_maskMode == MaskMode.Rect)
-        {
-            if (_dragging)
-            {
-                _dragging = false;
-                ApplyRectMask(_dragStart, e.GetPosition(Overlay));
-                if (_rectVisual != null) _rectVisual.Visibility = Visibility.Collapsed;
-            }
-        }
-        else
-        {
-            _painting = false;
-        }
+        if (_maskMode == MaskMode.Rect && _dragging) { _dragging = false; ApplyRectMask(_dragStart, e.GetPosition(Overlay)); if (_rectVisual != null) _rectVisual.Visibility = Visibility.Collapsed; }
+        else _painting = false;
         UpdateButtons();
     }
 
-    // --- Mask Helpers ---
-    private void UpdateRectVisual(Point a, Point b)
+    // --- Helper Methods ---
+    private void StartRectVisual()
     {
-        if (_rectVisual == null) return;
-        double x1 = Math.Min(a.X, b.X), y1 = Math.Min(a.Y, b.Y);
-        double w = Math.Abs(a.X - b.X), h = Math.Abs(a.Y - b.Y);
-        Canvas.SetLeft(_rectVisual, x1); Canvas.SetTop(_rectVisual, y1);
-        _rectVisual.Width = w; _rectVisual.Height = h;
-        _rectVisual.Visibility = Visibility.Visible;
+        if (_rectVisual == null)
+        {
+            _rectVisual = new Rectangle { Stroke = Brushes.Cyan, StrokeThickness = 2, Fill = Brushes.Transparent, StrokeDashArray = new DoubleCollection { 3, 2 } };
+            Overlay.Children.Add(_rectVisual);
+        }
+        Canvas.SetLeft(_rectVisual, _dragStart.X); Canvas.SetTop(_rectVisual, _dragStart.Y); _rectVisual.Width = 0; _rectVisual.Height = 0; _rectVisual.Visibility = Visibility.Visible;
     }
 
-    private void ApplyRectMask(Point a, Point b)
-    {
-        if (_inputBitmap == null || _maskGray8 == null) return;
-        var r = CanvasRectToImageRect(a, b);
-        if (r.w <= 0 || r.h <= 0) return;
-
-        for (int y = r.y; y < r.y + r.h; y++)
-        {
-            int row = y * _maskW;
-            for (int x = r.x; x < r.x + r.w; x++) _maskGray8[row + x] = 255;
-        }
-        UpdateMaskPreview();
-    }
-
-    private void PaintBrushAt(Point ptCanvas)
-    {
-        if (_inputBitmap == null || _maskGray8 == null) return;
-        var p = CanvasPointToImagePoint(ptCanvas);
-        if (p.x < 0) return;
-
-        int cx = p.x, cy = p.y, r = _brushRadiusPx, r2 = r * r;
-        int y0 = Math.Max(0, cy - r), y1 = Math.Min(_maskH - 1, cy + r);
-        int x0 = Math.Max(0, cx - r), x1 = Math.Min(_maskW - 1, cx + r);
-
-        for (int y = y0; y <= y1; y++)
-        {
-            int row = y * _maskW, dy = y - cy;
-            for (int x = x0; x <= x1; x++)
-            {
-                int dx = x - cx;
-                if (dx * dx + dy * dy <= r2) _maskGray8[row + x] = 255;
-            }
-        }
-        UpdateMaskPreview();
-    }
-
-    private void UpdateBrushCursorVisual(Point? pt)
-    {
-        if (!_overlayHover || _busy || _inputBitmap == null || rbBrush.IsChecked != true)
-        {
-            BrushCursor.Visibility = Visibility.Collapsed; return;
-        }
-        Point p = pt ?? Mouse.GetPosition(Overlay);
-
-        // (좌표 계산 로직은 이전과 동일, 생략 없이 전체 포함)
-        double cw = Overlay.ActualWidth, ch = Overlay.ActualHeight;
-        if (cw <= 2) return;
-        int iw = _inputBitmap.PixelWidth, ih = _inputBitmap.PixelHeight;
-        double imgAspect = (double)iw / ih, canvasAspect = cw / ch;
-        double dispW = (canvasAspect > imgAspect) ? ch * imgAspect : cw;
-        double dispH = (canvasAspect > imgAspect) ? ch : cw / imgAspect;
-        double offX = (cw - dispW) / 2, offY = (ch - dispH) / 2;
-
-        if (p.X < offX || p.X > offX + dispW || p.Y < offY || p.Y > offY + dispH)
-        {
-            BrushCursor.Visibility = Visibility.Collapsed; return;
-        }
-
-        double scale = dispW / iw;
-        double rDisp = Math.Max(2.0, _brushRadiusPx * scale);
-        BrushCursor.Width = rDisp * 2; BrushCursor.Height = rDisp * 2;
-        Canvas.SetLeft(BrushCursor, p.X - rDisp); Canvas.SetTop(BrushCursor, p.Y - rDisp);
-        BrushCursor.Visibility = Visibility.Visible;
-    }
-
-    // --- State & Util ---
     private void EnsureMaskBufferForInput()
     {
         if (_inputBitmap == null) return;
@@ -434,11 +254,7 @@ public partial class LamaView : UserControl, IDisposable
         if (_maskGray8 == null) { ImgMaskPreview.Source = null; return; }
         int stride = _maskW * 4;
         byte[] bgra = new byte[_maskW * _maskH * 4];
-        for (int i = 0; i < _maskGray8.Length; i++)
-        {
-            int j = i * 4;
-            bgra[j + 2] = 255; bgra[j + 3] = _maskGray8[i];
-        }
+        for (int i = 0; i < _maskGray8.Length; i++) { int j = i * 4; bgra[j + 2] = 255; bgra[j + 3] = _maskGray8[i]; }
         var bmp = BitmapSource.Create(_maskW, _maskH, 96, 96, PixelFormats.Bgra32, null, bgra, stride);
         bmp.Freeze();
         ImgMaskPreview.Source = bmp;
@@ -465,35 +281,78 @@ public partial class LamaView : UserControl, IDisposable
         return (x1, y1, x2 - x1, y2 - y1);
     }
 
-    private void SetBusy(bool busy, string? status)
+    private void UpdateRectVisual(Point a, Point b)
     {
-        _busy = busy;
-        if (status != null) SetStatus(status);
-        PbarLoading.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
-        ChkUseGpu.IsEnabled = !busy;
-        BtnPickModel.IsEnabled = !busy; BtnOpenImage.IsEnabled = !busy;
-        BtnRun.IsEnabled = !busy && _inpainter != null && _inputBitmap != null && HasAnyMask();
-        BtnClearMask.IsEnabled = !busy && _inputBitmap != null && HasAnyMask();
-        rbRect.IsEnabled = !busy; rbBrush.IsEnabled = !busy;
-        SlBrushSize.IsEnabled = !busy && rbBrush.IsChecked == true;
-        TxtBrushSize.IsEnabled = !busy && rbBrush.IsChecked == true;
+        if (_rectVisual == null) return;
+        double x1 = Math.Min(a.X, b.X), y1 = Math.Min(a.Y, b.Y);
+        double w = Math.Abs(a.X - b.X), h = Math.Abs(a.Y - b.Y);
+        Canvas.SetLeft(_rectVisual, x1); Canvas.SetTop(_rectVisual, y1);
+        _rectVisual.Width = w; _rectVisual.Height = h;
+        _rectVisual.Visibility = Visibility.Visible;
     }
-    private void UpdateButtons() { SetBusy(_busy, null); }
-    private void SetStatus(string t) => TxtStatus.Text = t;
-    private static BitmapImage BytesToBitmap(byte[] b)
+
+    private void UpdateBrushCursorVisual(Point? pt)
     {
-        var i = new BitmapImage(); using var m = new MemoryStream(b);
-        i.BeginInit(); i.CacheOption = BitmapCacheOption.OnLoad; i.StreamSource = m; i.EndInit(); i.Freeze(); return i;
+        if (!_overlayHover || _busy || _inputBitmap == null || rbBrush.IsChecked != true) { BrushCursor.Visibility = Visibility.Collapsed; return; }
+        Point p = pt ?? Mouse.GetPosition(Overlay);
+        double cw = Overlay.ActualWidth, ch = Overlay.ActualHeight;
+        if (cw <= 2) return;
+        int iw = _inputBitmap.PixelWidth, ih = _inputBitmap.PixelHeight;
+        double imgAspect = (double)iw / ih, canvasAspect = cw / ch;
+        double dispW = (canvasAspect > imgAspect) ? ch * imgAspect : cw;
+        double dispH = (canvasAspect > imgAspect) ? ch : cw / imgAspect;
+        double offX = (cw - dispW) / 2, offY = (ch - dispH) / 2;
+        if (p.X < offX || p.X > offX + dispW || p.Y < offY || p.Y > offY + dispH) { BrushCursor.Visibility = Visibility.Collapsed; return; }
+        double scale = dispW / iw;
+        double rDisp = Math.Max(2.0, _brushRadiusPx * scale);
+        BrushCursor.Width = rDisp * 2; BrushCursor.Height = rDisp * 2;
+        Canvas.SetLeft(BrushCursor, p.X - rDisp); Canvas.SetTop(BrushCursor, p.Y - rDisp);
+        BrushCursor.Visibility = Visibility.Visible;
     }
-    private static byte[] BitmapToPngBytes(BitmapSource b)
+
+    private void PaintBrushAt(Point ptCanvas)
     {
-        var e = new PngBitmapEncoder(); e.Frames.Add(BitmapFrame.Create(b));
-        using var m = new MemoryStream(); e.Save(m); return m.ToArray();
+        if (_inputBitmap == null || _maskGray8 == null) return;
+        var p = CanvasPointToImagePoint(ptCanvas);
+        if (p.x < 0) return;
+        int cx = p.x, cy = p.y, r = _brushRadiusPx, r2 = r * r;
+        int y0 = Math.Max(0, cy - r), y1 = Math.Min(_maskH - 1, cy + r);
+        int x0 = Math.Max(0, cx - r), x1 = Math.Min(_maskW - 1, cx + r);
+        for (int y = y0; y <= y1; y++)
+        {
+            int row = y * _maskW, dy = y - cy;
+            for (int x = x0; x <= x1; x++) { int dx = x - cx; if (dx * dx + dy * dy <= r2) _maskGray8[row + x] = 255; }
+        }
+        UpdateMaskPreview();
     }
+
+    private void ApplyRectMask(Point a, Point b)
+    {
+        if (_inputBitmap == null || _maskGray8 == null) return;
+        var r = CanvasRectToImageRect(a, b);
+        if (r.w <= 0 || r.h <= 0) return;
+        for (int y = r.y; y < r.y + r.h; y++) { int row = y * _maskW; for (int x = r.x; x < r.x + r.w; x++) _maskGray8[row + x] = 255; }
+        UpdateMaskPreview();
+    }
+
+    private static int Clamp(int v, int min, int max) => (v < min) ? min : (v > max ? max : v);
     private static byte[] Gray8MaskToPngBytes(byte[] g, int w, int h)
     {
         var b = BitmapSource.Create(w, h, 96, 96, PixelFormats.Gray8, null, g, w);
-        return BitmapToPngBytes(b);
+        var e = new PngBitmapEncoder(); e.Frames.Add(BitmapFrame.Create(b));
+        using var m = new MemoryStream(); e.Save(m); return m.ToArray();
     }
-    private static int Clamp(int v, int min, int max) => (v < min) ? min : (v > max ? max : v);
+
+    private void SetBusy(bool busy, string? msg = null)
+    {
+        _busy = busy;
+        SetBusyState(busy);
+        if (msg != null) Log(msg);
+        ChkUseGpu.IsEnabled = !busy; BtnPickModel.IsEnabled = !busy; BtnOpenImage.IsEnabled = !busy;
+        BtnUseOutput.IsEnabled = !busy && _outputBitmap != null; // 버튼 상태 관리
+        BtnRun.IsEnabled = !busy && _inpainter != null && _inputBitmap != null && HasAnyMask();
+        BtnClearMask.IsEnabled = !busy && _inputBitmap != null && HasAnyMask();
+        rbRect.IsEnabled = !busy; rbBrush.IsEnabled = !busy; SlBrushSize.IsEnabled = !busy && rbBrush.IsChecked == true;
+    }
+    private void UpdateButtons() => SetBusy(_busy, null);
 }

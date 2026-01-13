@@ -1,8 +1,8 @@
-﻿<UserControl x:Class="WpfAiRunner.Views.RealEsrganView"
+﻿<local:BaseAiView x:Class="WpfAiRunner.Views.RealEsrganView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgDark}"
-             Loaded="UserControl_Loaded">
+             xmlns:local="clr-namespace:WpfAiRunner.Views"
+             Background="{StaticResource BgDark}">
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -25,7 +25,6 @@
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <ProgressBar x:Name="PbarStatus" Width="100" Height="10" Margin="0,0,10,0" Visibility="Collapsed"/>
-
                     <TextBlock x:Name="TxtStatus" Text="Ready" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}"/>
                 </StackPanel>
             </DockPanel>
@@ -52,4 +51,4 @@
             </Border>
         </Grid>
     </Grid>
-</UserControl>
+</local:BaseAiView>

@@ -1,8 +1,8 @@
-﻿<UserControl x:Class="WpfAiRunner.Views.AnimeGanView"
+﻿<local:BaseAiView x:Class="WpfAiRunner.Views.AnimeGanView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Background="{StaticResource BgDark}"
-             Loaded="UserControl_Loaded">
+             xmlns:local="clr-namespace:WpfAiRunner.Views"
+             Background="{StaticResource BgDark}">
 
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -51,4 +51,4 @@
             </Border>
         </Grid>
     </Grid>
-</UserControl>
+</local:BaseAiView>
