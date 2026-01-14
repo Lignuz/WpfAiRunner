@@ -348,7 +348,7 @@ public partial class LamaView : BaseAiView
         _busy = busy;
         SetBusyState(busy);
         if (msg != null) Log(msg);
-        ChkUseGpu.IsEnabled = !busy; BtnPickModel.IsEnabled = !busy; BtnOpenImage.IsEnabled = !busy;
+        // ChkUseGpu.IsEnabled = !busy; BtnPickModel.IsEnabled = !busy; BtnOpenImage.IsEnabled = !busy; // not support GPU
         BtnUseOutput.IsEnabled = !busy && _outputBitmap != null; // 버튼 상태 관리
         BtnRun.IsEnabled = !busy && _inpainter != null && _inputBitmap != null && HasAnyMask();
         BtnClearMask.IsEnabled = !busy && _inputBitmap != null && HasAnyMask();

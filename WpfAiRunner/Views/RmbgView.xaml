@@ -18,7 +18,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
                     <Button x:Name="BtnLoadModel" Content="📂 Load RMBG-1.4" Click="BtnLoadModel_Click"/>
-                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click" IsChecked="True"/>
                     <Button x:Name="BtnOpenImage" Content="🖼️ Open Image" IsEnabled="False" Click="BtnOpenImage_Click"/>
                     <Button x:Name="BtnRun" Content="✨ Run" Style="{StaticResource BtnPrimary}" IsEnabled="False" Click="BtnRun_Click" Width="80"/>
                     <Button x:Name="BtnSave" Content="💾 Save" IsEnabled="False" Click="BtnSave_Click"/>

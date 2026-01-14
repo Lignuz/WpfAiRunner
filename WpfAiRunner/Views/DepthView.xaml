@@ -15,7 +15,7 @@
                 <Button x:Name="BtnPickModel" Content="📂 Load Depth Model..." Click="BtnPickModel_Click"/>
                 <TextBlock x:Name="TxtModel" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="5,0,15,0" Text="(no model)"/>
 
-                <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
+                <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click" IsChecked="True"/>
 
                 <Button x:Name="BtnOpenImage" Content="🖼️ Open Image" Click="BtnOpenImage_Click"/>
 

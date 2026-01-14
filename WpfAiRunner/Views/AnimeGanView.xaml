@@ -20,7 +20,7 @@
                         <ComboBoxItem Content="Paprika (Satoshi)"/>
                     </ComboBox>
 
-                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click" IsChecked="True"/>
 
                     <Button x:Name="BtnOpenImage" Content="🖼️ Open Image" IsEnabled="False" Click="BtnOpenImage_Click"/>
 

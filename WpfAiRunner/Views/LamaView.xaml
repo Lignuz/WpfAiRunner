@@ -26,7 +26,8 @@
                     <Button x:Name="BtnPickModel" Content="📂 Model..." Click="BtnPickModel_Click"/>
                     <TextBlock x:Name="TxtModel" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" Margin="5,0,15,0" Text="(no model)"/>
 
-                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" ToolTip="Check to use CUDA acceleration" Click="ChkUseGpu_Click"/>
+                    <!-- DirectML does not support some operations used in LaMa, so disable GPU option -->
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" ToolTip="Check to use CUDA acceleration" Click="ChkUseGpu_Click" IsEnabled="False" Visibility="Collapsed"/>
 
                     <Button x:Name="BtnOpenImage" Content="🖼️ Open Image..." Click="BtnOpenImage_Click"/>
 

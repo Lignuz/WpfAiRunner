@@ -19,7 +19,7 @@
                     </ComboBox>
 
                     <Button x:Name="BtnLoadModels" Content="1. 📂 Load Models..." Width="140" Click="BtnLoadModels_Click"/>
-                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click"/>
+                    <CheckBox x:Name="ChkUseGpu" Content="Use GPU" Click="ChkUseGpu_Click" IsChecked="True"/>
 
                     <Button x:Name="BtnOpenImage" Content="2. 🖼️ Open Image" Width="140" IsEnabled="False" Click="BtnOpenImage_Click"/>
 
