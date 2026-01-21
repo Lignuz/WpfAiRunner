@@ -6,7 +6,7 @@ using SamEngine;
 
 namespace OnnxEngines.Sam;
 
-public class Sam2Segmenter : ISamSegmenter
+public class Sam2Segmenter : BaseOnnxEngine, ISamSegmenter
 {
     private InferenceSession? _encoderSession;
     private InferenceSession? _decoderSession;
@@ -19,8 +19,6 @@ public class Sam2Segmenter : ISamSegmenter
     // SAM2용 정규화 값
     private readonly float[] _mean = new[] { 123.675f, 116.28f, 103.53f };
     private readonly float[] _std = new[] { 58.395f, 57.12f, 57.375f };
-
-    public string DeviceMode { get; private set; } = "CPU";
 
     public void LoadModels(string encoderPath, string decoderPath, bool useGpu)
     {
@@ -159,7 +157,7 @@ public class Sam2Segmenter : ISamSegmenter
         return ms.ToArray();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         _encoderSession?.Dispose();
         _decoderSession?.Dispose();

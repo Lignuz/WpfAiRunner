@@ -5,35 +5,33 @@ using OnnxEngines.Utils;
 
 namespace OnnxEngines.Depth;
 
-public class DepthEstimator : IDisposable
+public class DepthEstimator : BaseOnnxEngine
 {
-    private readonly InferenceSession _session;
     private const int ModelSize = 518;
 
     private Tensor<float>? _lastOutputTensor;
     private int _lastOrigW, _lastOrigH;
 
-    public string DeviceMode { get; private set; } = "CPU";
+    public DepthEstimator(string modelPath, bool useGpu = false) : base(modelPath, useGpu) { }
 
-    public DepthEstimator(string modelPath, bool useGpu = false)
+    protected override void OnWarmup()
     {
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
+        if (_session == null) return; // 안전장치
 
-        if (DeviceMode.Contains("GPU"))
+        try
         {
-            try
-            {
-                var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-                string inputName = _session.InputMetadata.Keys.First();
-                using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
-            }
-            catch { }
+            var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+            string inputName = _session.InputMetadata.Keys.First();
+            using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
         }
+        catch {}
     }
 
     // 1단계: 추론만 수행
     public void RunInference(byte[] imageBytes)
     {
+        if (_session == null) throw new System.InvalidOperationException("Model not loaded.");
+
         using var src = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         _lastOrigW = src.Width;
         _lastOrigH = src.Height;
@@ -111,6 +109,4 @@ public class DepthEstimator : IDisposable
 
         return img;
     }
-
-    public void Dispose() => _session?.Dispose();
 }

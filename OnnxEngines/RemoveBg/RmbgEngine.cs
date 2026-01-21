@@ -5,27 +5,21 @@ using OnnxEngines.Utils;
 
 namespace OnnxEngines.Rmbg;
 
-public class RmbgEngine : IDisposable
+public class RmbgEngine : BaseOnnxEngine
 {
-    private InferenceSession? _session;
-    public string DeviceMode { get; private set; } = "CPU";
     private const int ModelSize = 1024;
 
-    public void LoadModel(string modelPath, bool useGpu)
+    protected override void OnWarmup()
     {
-        _session?.Dispose();
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
+        if (_session == null) return; // 안전장치
 
-        if (DeviceMode == "GPU")
+        try
         {
-            try
-            {
-                var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-                string inputName = _session.InputMetadata.Keys.First();
-                using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
-            }
-            catch { }
+            var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+            string inputName = _session.InputMetadata.Keys.First();
+            using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
         }
+        catch { }
     }
 
     public byte[] RemoveBackground(byte[] imageBytes, float threshold = 0.0f, SKColor? bgColor = null)
@@ -116,6 +110,4 @@ public class RmbgEngine : IDisposable
         data.SaveTo(ms);
         return ms.ToArray();
     }
-
-    public void Dispose() => _session?.Dispose();
 }

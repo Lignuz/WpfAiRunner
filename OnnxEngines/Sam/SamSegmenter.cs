@@ -6,7 +6,7 @@ using SamEngine;
 
 namespace OnnxEngines.Sam;
 
-public class SamSegmenter : ISamSegmenter
+public class SamSegmenter : BaseOnnxEngine, ISamSegmenter
 {
     private InferenceSession? _encoderSession;
     private InferenceSession? _decoderSession;
@@ -17,7 +17,6 @@ public class SamSegmenter : ISamSegmenter
     private int _orgW, _orgH;
     private int _resizedW, _resizedH;
     private Tensor<float>? _lastMaskTensor;
-    public string DeviceMode { get; private set; } = "CPU";
 
     public void LoadModels(string encoderPath, string decoderPath, bool useGpu)
     {
@@ -186,7 +185,7 @@ public class SamSegmenter : ISamSegmenter
         return ms.ToArray();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         _encoderSession?.Dispose();
         _decoderSession?.Dispose();

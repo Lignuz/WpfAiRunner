@@ -5,21 +5,17 @@ using OnnxEngines.Utils;
 
 namespace OnnxEngines.Face;
 
-public class YoloFaceDetector : IFaceDetector
+public class YoloFaceDetector : BaseOnnxEngine, IFaceDetector
 {
-    private readonly InferenceSession _session;
-    public string DeviceMode { get; private set; } = "CPU";
-
     // YOLOv8n-Face 입력 크기
     private const int InputSize = 640;
 
-    public YoloFaceDetector(string modelPath, bool useGpu = false)
-    {
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
-    }
-
+    public YoloFaceDetector(string modelPath, bool useGpu = false) : base(modelPath, useGpu) { }
+    
     public List<SKRectI> DetectFaces(byte[] imageBytes, float confThreshold = 0.5f)
     {
+        if (_session == null) throw new System.InvalidOperationException("Model not loaded.");
+
         using var image = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         int origW = image.Width;
         int origH = image.Height;
@@ -151,6 +147,4 @@ public class YoloFaceDetector : IFaceDetector
         using var data = image.Encode(SKEncodedImageFormat.Png, 100);
         return data.ToArray();
     }
-
-    public void Dispose() => _session?.Dispose();
 }

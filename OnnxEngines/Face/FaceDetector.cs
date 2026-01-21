@@ -5,21 +5,17 @@ using OnnxEngines.Utils;
 
 namespace OnnxEngines.Face;
 
-public class FaceDetector : IFaceDetector
+public class FaceDetector : BaseOnnxEngine, IFaceDetector
 {
-    private readonly InferenceSession _session;
-    public string DeviceMode { get; private set; } = "CPU";
-
     private const int InputWidth = 320;
     private const int InputHeight = 240;
 
-    public FaceDetector(string modelPath, bool useGpu = false)
-    {
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
-    }
-
+    public FaceDetector(string modelPath, bool useGpu = false) : base(modelPath, useGpu) { }
+    
     public List<SKRectI> DetectFaces(byte[] imageBytes, float confThreshold = 0.7f)
     {
+        if (_session == null) throw new System.InvalidOperationException("Model not loaded.");
+
         using var image = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         int origW = image.Width;
         int origH = image.Height;
@@ -150,6 +146,4 @@ public class FaceDetector : IFaceDetector
         using var data = image.Encode(SKEncodedImageFormat.Png, 100);
         return data.ToArray();
     }
-
-    public void Dispose() => _session?.Dispose();
 }

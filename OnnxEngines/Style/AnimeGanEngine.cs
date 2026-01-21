@@ -1,17 +1,12 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
-using OnnxEngines.Utils;
-using System.Runtime.InteropServices;
 
 namespace OnnxEngines.Style;
 
-public class AnimeGanEngine : IDisposable
+public class AnimeGanEngine : BaseOnnxEngine
 {
-    private InferenceSession? _session;
-    public string DeviceMode { get; private set; } = "None";
-
-    public void LoadModel(string modelPath, bool useGpu)
+    public override void LoadModel(string modelPath, bool useGpu)
     {
         _session?.Dispose();
 
@@ -133,6 +128,4 @@ public class AnimeGanEngine : IDisposable
         data.SaveTo(ms);
         return ms.ToArray();
     }
-
-    public void Dispose() => _session?.Dispose();
 }

@@ -5,35 +5,41 @@ using OnnxEngines.Utils;
 
 namespace OnnxEngines.Lama;
 
-public class LamaInpainter : IDisposable
+public class LamaInpainter : BaseOnnxEngine
 {
-    private readonly InferenceSession _session;
     private const int ModelSize = 512;
-    public string DeviceMode { get; private set; } = "CPU";
 
-    public LamaInpainter(string modelPath, bool useGpu = false)
+    public LamaInpainter(string modelPath, bool useGpu) : base(modelPath, useGpu) { }
+
+    protected override void OnWarmup()
     {
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
+        if (_session == null) return; // 안전장치
 
-        if (DeviceMode.Contains("GPU"))
+        try
         {
-            try
+            // 웜업용 더미 데이터
+            var dummy = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
+            var dummyMask = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
+
+            var inputs = new List<NamedOnnxValue>
             {
-                var dummyImage = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
-                var dummyMask = new DenseTensor<float>(new[] { 1, 1, ModelSize, ModelSize });
-                var inputs = new List<NamedOnnxValue>
-                {
-                    NamedOnnxValue.CreateFromTensor("image", dummyImage),
-                    NamedOnnxValue.CreateFromTensor("mask", dummyMask)
-                };
-                using var results = _session.Run(inputs);
-            }
-            catch { }
+                NamedOnnxValue.CreateFromTensor("image", dummy),
+                NamedOnnxValue.CreateFromTensor("mask", dummyMask)
+            };
+
+            // [경고 해결] _session 뒤에 !를 붙여서 null이 아님을 명시 (LoadModel 호출 중이므로)
+            using var res = _session!.Run(inputs);
+        }
+        catch
+        {
+            // 웜업 실패는 무시 (로그만 남기거나)
         }
     }
 
     public byte[] ProcessImage(byte[] imageBytes, byte[] maskBytes)
     {
+        if (_session == null) throw new System.InvalidOperationException("Model not loaded.");
+
         // 마스크는 그레이스케일 등으로 읽기 위해 기본 디코드 사용
         using var src = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         using var mask = SKBitmap.Decode(maskBytes).Copy(SKColorType.Rgba8888); // 편의상 Rgba로 통일
@@ -72,6 +78,8 @@ public class LamaInpainter : IDisposable
 
     private SKBitmap RunInference(SKBitmap img, SKBitmap mask)
     {
+        if (_session == null) throw new System.InvalidOperationException("Model not loaded.");
+
         var imgTensor = img.ToTensor(ModelSize, ModelSize);
         var maskTensor = mask.ToMaskTensor(ModelSize, ModelSize);
 
@@ -232,6 +240,4 @@ public class LamaInpainter : IDisposable
         v = Math.Clamp(v, 0f, 1f);
         return (byte)(v * 255f);
     }
-
-    public void Dispose() => _session?.Dispose();
 }

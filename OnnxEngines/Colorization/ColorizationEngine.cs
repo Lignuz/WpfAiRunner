@@ -1,27 +1,15 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using SkiaSharp;
-using OnnxEngines.Utils;
-using System.Runtime.InteropServices;
 
 namespace OnnxEngines.Colorization;
 
-public class ColorizationEngine : IDisposable
+public class ColorizationEngine : BaseOnnxEngine
 {
-    private InferenceSession? _session;
-    public string DeviceMode { get; private set; } = "None";
-
     // DDColor 모델 입력 크기 (512x512 고정)
     private const int ModelInputSize = 512;
 
-    // 1. LoadModel 메서드
-    public void LoadModel(string modelPath, bool useGpu)
-    {
-        _session?.Dispose();
-        (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
-    }
-
-    // 2. Process 메서드
+    // Process 메서드
     public byte[] Process(byte[] imageBytes)
     {
         if (_session == null) throw new InvalidOperationException("Model not loaded.");
@@ -134,9 +122,6 @@ public class ColorizationEngine : IDisposable
         using var data = outputImage.Encode(SKEncodedImageFormat.Png, 100);
         return data.ToArray();
     }
-
-    public void Dispose() => _session?.Dispose();
-
 
     // ================================
     // OpenCV 스타일 색공간 변환 함수들
