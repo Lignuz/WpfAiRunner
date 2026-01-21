@@ -1,4 +1,4 @@
-﻿using SixLabors.ImageSharp.PixelFormats;
+﻿using SkiaSharp;
 
 namespace OnnxEngines.Utils;
 
@@ -13,14 +13,15 @@ public enum ColormapStyle
 
 public static class ColorMapper
 {
-    public static Rgba32 GetColor(float value, ColormapStyle style)
+    // Rgba32 -> SKColor 로 변경
+    public static SKColor GetColor(float value, ColormapStyle style)
     {
         value = Math.Clamp(value, 0.0f, 1.0f);
 
         if (style == ColormapStyle.Grayscale)
         {
             byte v = (byte)(value * 255);
-            return new Rgba32(v, v, v, 255);
+            return new SKColor(v, v, v, 255);
         }
 
         // 각 스타일별 주요 색상 지점 (0.0, 0.25, 0.5, 0.75, 1.0)
@@ -54,6 +55,6 @@ public static class ColorMapper
         byte g = (byte)(palette[i][1] + (palette[i + 1][1] - palette[i][1]) * t);
         byte b = (byte)(palette[i][2] + (palette[i + 1][2] - palette[i][2]) * t);
 
-        return new Rgba32(r, g, b, 255);
+        return new SKColor(r, g, b, 255);
     }
 }

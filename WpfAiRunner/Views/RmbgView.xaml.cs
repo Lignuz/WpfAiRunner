@@ -1,7 +1,7 @@
 ﻿using Microsoft.Win32;
 using OnnxEngines.Rmbg;
 using OnnxEngines.Utils;
-using SixLabors.ImageSharp.PixelFormats;
+using SkiaSharp;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -88,20 +88,23 @@ public partial class RmbgView : BaseAiView
         try
         {
             float threshold = (float)SldThreshold.Value;
-            Rgba32? bgColor = null;
+            SKColor? bgColor = null; // Rgba32 -> SKColor
+
             if (CboBackground.SelectedIndex > 0)
             {
                 bgColor = CboBackground.SelectedIndex switch
                 {
-                    1 => new Rgba32(255, 255, 255),
-                    2 => new Rgba32(0, 0, 0),
-                    3 => new Rgba32(0, 255, 0),
-                    4 => new Rgba32(0, 0, 255),
+                    1 => SKColors.White, // new SKColor(255, 255, 255)
+                    2 => SKColors.Black, // new SKColor(0, 0, 0)
+                    3 => SKColors.Green, // new SKColor(0, 255, 0)
+                    4 => SKColors.Blue,  // new SKColor(0, 0, 255)
                     _ => null
                 };
             }
 
             byte[] inputBytes = BitmapToBytes(_inputBitmap);
+
+            // 엔진 메서드가 SKColor?를 받도록 변경되었음
             byte[] resultBytes = await Task.Run(() => _engine.RemoveBackground(inputBytes, threshold, bgColor));
 
             ImgOutput.Source = BytesToBitmap(resultBytes);

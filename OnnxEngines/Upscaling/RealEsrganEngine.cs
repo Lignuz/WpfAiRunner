@@ -1,8 +1,6 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using OnnxEngines.Utils;
 
 namespace OnnxEngines.Upscaling;
@@ -19,14 +17,12 @@ public class RealEsrganEngine : IDisposable
     public void LoadModel(string modelPath, bool useGpu)
     {
         _session?.Dispose();
-        // OnnxHelper 사용
         (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
 
         if (DeviceMode == "GPU")
         {
             try
             {
-                // 간단한 웜업
                 var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelInputSize, ModelInputSize });
                 string inputName = _session.InputMetadata.Keys.First();
                 using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
@@ -39,19 +35,26 @@ public class RealEsrganEngine : IDisposable
     {
         if (_session == null) throw new InvalidOperationException("Model not loaded.");
 
-        using var srcImage = Image.Load<Rgba32>(imageBytes);
+        using var srcImage = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         int w = srcImage.Width;
         int h = srcImage.Height;
 
         int padW = w + (Overlap * 2);
         int padH = h + (Overlap * 2);
 
-        using var paddedSrc = new Image<Rgba32>(padW, padH);
-        paddedSrc.Mutate(x => x.DrawImage(srcImage, new Point(Overlap, Overlap), 1f));
+        // 패딩 이미지 생성 (Draw Image with Offset)
+        using var paddedSrc = new SKBitmap(padW, padH, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(paddedSrc))
+        {
+            // 기본은 Transparent (0,0,0,0)이나 Black일 수 있음. 필요시 Clear 호출
+            canvas.Clear(SKColors.Black);
+            canvas.DrawBitmap(srcImage, Overlap, Overlap);
+        }
 
         int outW = w * 4;
         int outH = h * 4;
-        using var resultImage = new Image<Rgba32>(outW, outH);
+        using var resultImage = new SKBitmap(outW, outH, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using var resultCanvas = new SKCanvas(resultImage);
 
         int countX = (int)Math.Ceiling((double)w / StepSize);
         int countY = (int)Math.Ceiling((double)h / StepSize);
@@ -68,7 +71,11 @@ public class RealEsrganEngine : IDisposable
                 if (srcX + ModelInputSize > padW) srcX = padW - ModelInputSize;
                 if (srcY + ModelInputSize > padH) srcY = padH - ModelInputSize;
 
-                using var tile = paddedSrc.Clone(ctx => ctx.Crop(new Rectangle(srcX, srcY, ModelInputSize, ModelInputSize)));
+                // 타일 잘라내기
+                using var tile = new SKBitmap(ModelInputSize, ModelInputSize);
+                paddedSrc.ExtractSubset(tile, SKRectI.Create(srcX, srcY, ModelInputSize, ModelInputSize));
+
+                // 추론
                 using var upscaledTile = ProcessTile(tile);
 
                 int destX = x * StepSize * 4;
@@ -81,9 +88,13 @@ public class RealEsrganEngine : IDisposable
                 if (destX + cropW > outW) destX = outW - cropW;
                 if (destY + cropH > outH) destY = outH - cropH;
 
-                var validRect = new Rectangle(cropX, cropY, cropW, cropH);
-                using var validPart = upscaledTile.Clone(ctx => ctx.Crop(validRect));
-                resultImage.Mutate(ctx => ctx.DrawImage(validPart, new Point(destX, destY), 1f));
+                // 유효 영역 잘라내기
+                var validRect = SKRectI.Create(cropX, cropY, cropW, cropH);
+                using var validPart = new SKBitmap(cropW, cropH);
+                upscaledTile.ExtractSubset(validPart, validRect);
+
+                // 결과 캔버스에 그리기
+                resultCanvas.DrawBitmap(validPart, destX, destY);
 
                 processedCount++;
                 progress?.Report((double)processedCount / totalTiles);
@@ -91,13 +102,14 @@ public class RealEsrganEngine : IDisposable
         }
 
         using var ms = new MemoryStream();
-        resultImage.SaveAsPng(ms);
+        using var data = resultImage.Encode(SKEncodedImageFormat.Png, 100);
+        data.SaveTo(ms);
         return ms.ToArray();
     }
 
-    private Image<Rgba32> ProcessTile(Image<Rgba32> tileImage)
+    private SKBitmap ProcessTile(SKBitmap tileImage)
     {
-        // TensorHelper 사용 (0~1 정규화)
+        // TensorHelper 사용
         var inputTensor = tileImage.ToTensor(ModelInputSize, ModelInputSize);
 
         var inputName = _session!.InputMetadata.Keys.First();
@@ -105,21 +117,27 @@ public class RealEsrganEngine : IDisposable
         var outputTensor = results.First().AsTensor<float>();
 
         int outSize = ModelInputSize * 4;
-        var outputImage = new Image<Rgba32>(outSize, outSize);
-        outputImage.ProcessPixelRows(accessor =>
+        var outputImage = new SKBitmap(outSize, outSize, SKColorType.Rgba8888, SKAlphaType.Premul);
+        Span<byte> pixels = outputImage.GetPixelSpan();
+        int bpp = outputImage.BytesPerPixel;
+
+        for (int y = 0; y < outSize; y++)
         {
-            for (int y = 0; y < outSize; y++)
+            int rowOff = y * outputImage.RowBytes;
+            for (int x = 0; x < outSize; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < outSize; x++)
-                {
-                    float r = Math.Clamp(outputTensor[0, 0, y, x], 0, 1) * 255;
-                    float g = Math.Clamp(outputTensor[0, 1, y, x], 0, 1) * 255;
-                    float b = Math.Clamp(outputTensor[0, 2, y, x], 0, 1) * 255;
-                    row[x] = new Rgba32((byte)r, (byte)g, (byte)b);
-                }
+                // 모델 출력은 보통 0~1 사이 값
+                float r = Math.Clamp(outputTensor[0, 0, y, x], 0, 1) * 255;
+                float g = Math.Clamp(outputTensor[0, 1, y, x], 0, 1) * 255;
+                float b = Math.Clamp(outputTensor[0, 2, y, x], 0, 1) * 255;
+
+                int i = rowOff + (x * bpp);
+                pixels[i] = (byte)r;
+                pixels[i + 1] = (byte)g;
+                pixels[i + 2] = (byte)b;
+                pixels[i + 3] = 255;
             }
-        });
+        }
 
         return outputImage;
     }

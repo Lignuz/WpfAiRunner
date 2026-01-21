@@ -1,8 +1,6 @@
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using OnnxEngines.Utils;
 
 namespace OnnxEngines.Lama;
@@ -15,11 +13,9 @@ public class LamaInpainter : IDisposable
 
     public LamaInpainter(string modelPath, bool useGpu = false)
     {
-        // OnnxHelper를 사용하여 세션 로드 및 디바이스 모드 설정
         (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
 
-        // GPU 모드일 경우 웜업 실행
-        if (DeviceMode == "GPU")
+        if (DeviceMode.Contains("GPU"))
         {
             try
             {
@@ -38,44 +34,46 @@ public class LamaInpainter : IDisposable
 
     public byte[] ProcessImage(byte[] imageBytes, byte[] maskBytes)
     {
-        using var src = Image.Load<Rgba32>(imageBytes);
-        using var mask = Image.Load<L8>(maskBytes);
+        // 마스크는 그레이스케일 등으로 읽기 위해 기본 디코드 사용
+        using var src = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
+        using var mask = SKBitmap.Decode(maskBytes).Copy(SKColorType.Rgba8888); // 편의상 Rgba로 통일
 
-        // 마스크가 없으면 원본 그대로 반환
         if (!HasAnyMask(mask))
         {
-            using var msNoop = new MemoryStream();
-            src.SaveAsPng(msNoop);
-            return msNoop.ToArray();
+            // 변경 사항 없으면 그대로 저장
+            using var dataNoop = src.Encode(SKEncodedImageFormat.Png, 100);
+            return dataNoop.ToArray();
         }
 
-        // 1. 마스크 영역(ROI) 계산 및 정사각형 보정
+        // 1. ROI 계산
         var roi = GetMaskBoundingBox(mask);
         roi = AdjustRoiToSquare(roi, src.Width, src.Height);
 
-        // 2. ROI 크롭
-        using var srcCrop = src.Clone(ctx => ctx.Crop(roi));
-        using var maskCrop = mask.Clone(ctx => ctx.Crop(roi));
+        // 2. ROI 크롭 (ExtractSubset은 픽셀 공유, 딥카피가 필요하면 Copy 사용)
+        using var srcCrop = new SKBitmap(roi.Width, roi.Height);
+        src.ExtractSubset(srcCrop, roi);
 
-        // 3. 추론 (512x512 리사이즈 및 복원은 내부에서 처리)
+        using var maskCrop = new SKBitmap(roi.Width, roi.Height);
+        mask.ExtractSubset(maskCrop, roi);
+
+        // 3. 추론 (512x512 처리)
         using var out512 = RunInference(srcCrop, maskCrop);
 
-        // 4. 결과물을 원래 ROI 크기로 복원
-        out512.Mutate(ctx => ctx.Resize(roi.Width, roi.Height, KnownResamplers.Bicubic));
+        // 4. 결과물을 ROI 크기로 복원
+        using var outResized = out512.Resize(new SKImageInfo(roi.Width, roi.Height), new SKSamplingOptions(SKCubicResampler.Mitchell));
 
-        // 5. 원본 이미지의 해당 위치에 덮어쓰기 (Inpainting 적용)
-        src.Mutate(ctx => ctx.DrawImage(out512, new Point(roi.X, roi.Y), 1f));
+        // 5. 원본 이미지에 덮어쓰기
+        using var canvas = new SKCanvas(src);
+        canvas.DrawBitmap(outResized, roi.Left, roi.Top);
 
-        using var ms = new MemoryStream();
-        src.SaveAsPng(ms);
-        return ms.ToArray();
+        using var data = src.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
-    private Image<Rgba32> RunInference(Image<Rgba32> img, Image<L8> mask)
+    private SKBitmap RunInference(SKBitmap img, SKBitmap mask)
     {
-        // TensorHelper를 사용하여 텐서 변환
-        var imgTensor = img.ToTensor(ModelSize, ModelSize); // 0~1 정규화 포함
-        var maskTensor = mask.ToMaskTensor(ModelSize, ModelSize); // 마스크 변환 포함
+        var imgTensor = img.ToTensor(ModelSize, ModelSize);
+        var maskTensor = mask.ToMaskTensor(ModelSize, ModelSize);
 
         var inputs = new List<NamedOnnxValue>
         {
@@ -86,87 +84,83 @@ public class LamaInpainter : IDisposable
         using var results = _session.Run(inputs);
         var outputTensor = results.First().AsTensor<float>();
 
-        // 후처리 (텐서 -> 이미지 변환, Auto Scale 적용)
         return TensorToImageAuto(outputTensor);
     }
 
     // --- Helper Methods ---
 
-    private bool HasAnyMask(Image<L8> mask)
+    private bool HasAnyMask(SKBitmap mask)
     {
-        bool any = false;
-        mask.ProcessPixelRows(accessor =>
+        // 고속 픽셀 검사
+        ReadOnlySpan<byte> pixels = mask.GetPixelSpan();
+        int bpp = mask.BytesPerPixel; // 4 (Rgba8888)
+
+        // Alpha 혹은 RGB 값 체크. Grayscale 변환된 경우 R=G=B
+        for (int i = 0; i < pixels.Length; i += bpp)
         {
-            for (int y = 0; y < accessor.Height && !any; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < accessor.Width; x++)
-                {
-                    if (row[x].PackedValue > 127)
-                    {
-                        any = true;
-                        break;
-                    }
-                }
-            }
-        });
-        return any;
+            // R채널(혹은 밝기)이 127보다 크면 마스크로 간주
+            if (pixels[i] > 127) return true;
+        }
+        return false;
     }
 
-    private Rectangle GetMaskBoundingBox(Image<L8> mask)
+    private SKRectI GetMaskBoundingBox(SKBitmap mask)
     {
         int minX = mask.Width, minY = mask.Height, maxX = 0, maxY = 0;
         bool found = false;
 
-        mask.ProcessPixelRows(accessor =>
+        ReadOnlySpan<byte> pixels = mask.GetPixelSpan();
+        int width = mask.Width;
+        int height = mask.Height;
+        int rowBytes = mask.RowBytes;
+        int bpp = mask.BytesPerPixel;
+
+        for (int y = 0; y < height; y++)
         {
-            for (int y = 0; y < accessor.Height; y++)
+            int rowOff = y * rowBytes;
+            for (int x = 0; x < width; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < accessor.Width; x++)
+                if (pixels[rowOff + x * bpp] > 127)
                 {
-                    if (row[x].PackedValue > 127)
-                    {
-                        if (x < minX) minX = x;
-                        if (x > maxX) maxX = x;
-                        if (y < minY) minY = y;
-                        if (y > maxY) maxY = y;
-                        found = true;
-                    }
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                    found = true;
                 }
             }
-        });
+        }
 
-        if (!found) return new Rectangle(0, 0, mask.Width, mask.Height);
-        return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
+        if (!found) return new SKRectI(0, 0, width, height);
+        // Width/Height 계산
+        return SKRectI.Create(minX, minY, maxX - minX + 1, maxY - minY + 1);
     }
 
-    private Rectangle AdjustRoiToSquare(Rectangle roi, int imgW, int imgH)
+    private SKRectI AdjustRoiToSquare(SKRectI roi, int imgW, int imgH)
     {
-        int cx = roi.X + roi.Width / 2;
-        int cy = roi.Y + roi.Height / 2;
+        int cx = roi.MidX;
+        int cy = roi.MidY;
 
         int size = Math.Max(roi.Width, roi.Height);
-        size = (int)(size * 2.0); // Context 확보를 위해 2배 확장
+        size = (int)(size * 2.0);
         size = Math.Max(size, 512);
 
         int half = size / 2;
         int x = cx - half;
         int y = cy - half;
 
-        // 이미지 경계 벗어나지 않도록 보정
         if (x < 0) x = 0;
         if (y < 0) y = 0;
         if (x + size > imgW) x = imgW - size;
         if (y + size > imgH) y = imgH - size;
 
-        if (x < 0 || y < 0) return new Rectangle(0, 0, imgW, imgH);
-        return new Rectangle(x, y, size, size);
+        if (x < 0 || y < 0) return new SKRectI(0, 0, imgW, imgH);
+        return SKRectI.Create(x, y, size, size);
     }
 
-    // --- Post-Processing Logic (Lama 모델 특성상 출력 스케일 자동 보정 필요) ---
+    // --- Post-Processing Logic ---
 
-    private Image<Rgba32> TensorToImageAuto(Tensor<float> outTensor)
+    private SKBitmap TensorToImageAuto(Tensor<float> outTensor)
     {
         var (minV, maxV) = SampleMinMax(outTensor);
         var scale = DecideOutputScale(minV, maxV);
@@ -178,27 +172,26 @@ public class LamaInpainter : IDisposable
             _ => 1f
         };
 
-        var img = new Image<Rgba32>(ModelSize, ModelSize);
-        img.ProcessPixelRows(accessor =>
-        {
-            for (int y = 0; y < ModelSize; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < ModelSize; x++)
-                {
-                    float r = outTensor[0, 0, y, x];
-                    float g = outTensor[0, 1, y, x];
-                    float b = outTensor[0, 2, y, x];
+        var img = new SKBitmap(ModelSize, ModelSize, SKColorType.Rgba8888, SKAlphaType.Premul);
+        Span<byte> pixels = img.GetPixelSpan();
+        int bpp = img.BytesPerPixel;
 
-                    row[x] = new Rgba32(
-                        ToByte(r, scale, to01_mul),
-                        ToByte(g, scale, to01_mul),
-                        ToByte(b, scale, to01_mul),
-                        255
-                    );
-                }
+        for (int y = 0; y < ModelSize; y++)
+        {
+            int rowOff = y * img.RowBytes;
+            for (int x = 0; x < ModelSize; x++)
+            {
+                float r = outTensor[0, 0, y, x];
+                float g = outTensor[0, 1, y, x];
+                float b = outTensor[0, 2, y, x];
+
+                int offset = rowOff + (x * bpp);
+                pixels[offset] = ToByte(r, scale, to01_mul);
+                pixels[offset + 1] = ToByte(g, scale, to01_mul);
+                pixels[offset + 2] = ToByte(b, scale, to01_mul);
+                pixels[offset + 3] = 255;
             }
-        });
+        }
         return img;
     }
 
@@ -207,7 +200,7 @@ public class LamaInpainter : IDisposable
         if (t is DenseTensor<float> dt)
         {
             var span = dt.Buffer.Span;
-            int step = Math.Max(1, span.Length / 1000); // 1000개 샘플링
+            int step = Math.Max(1, span.Length / 1000);
             float minV = float.PositiveInfinity;
             float maxV = float.NegativeInfinity;
             for (int i = 0; i < span.Length; i += step)

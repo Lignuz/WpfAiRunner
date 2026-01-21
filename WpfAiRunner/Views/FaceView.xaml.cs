@@ -1,5 +1,6 @@
 ﻿using OnnxEngines.Face;
 using OnnxEngines.Utils;
+using SkiaSharp;
 using System.Windows;
 using System.Windows.Controls;
 
@@ -8,7 +9,7 @@ namespace WpfAiRunner.Views;
 public partial class FaceView : BaseAiView
 {
     private IFaceDetector? _detector;
-    private List<SixLabors.ImageSharp.Rectangle>? _cachedFaces;
+    private List<SKRectI>? _cachedFaces;
 
     private string? _rfbPath;
     private string? _yolo8Path;

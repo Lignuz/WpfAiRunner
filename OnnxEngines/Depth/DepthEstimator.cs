@@ -1,8 +1,6 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using OnnxEngines.Utils;
 
 namespace OnnxEngines.Depth;
@@ -12,7 +10,6 @@ public class DepthEstimator : IDisposable
     private readonly InferenceSession _session;
     private const int ModelSize = 518;
 
-    // 마지막 추론 결과를 저장할 변수 (캐시)
     private Tensor<float>? _lastOutputTensor;
     private int _lastOrigW, _lastOrigH;
 
@@ -20,14 +17,12 @@ public class DepthEstimator : IDisposable
 
     public DepthEstimator(string modelPath, bool useGpu = false)
     {
-        // OnnxHelper 사용
         (_session, DeviceMode) = OnnxHelper.LoadSession(modelPath, useGpu);
 
         if (DeviceMode.Contains("GPU"))
         {
             try
             {
-                // Warm-up
                 var dummyTensor = new DenseTensor<float>(new[] { 1, 3, ModelSize, ModelSize });
                 string inputName = _session.InputMetadata.Keys.First();
                 using var results = _session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, dummyTensor) });
@@ -36,14 +31,14 @@ public class DepthEstimator : IDisposable
         }
     }
 
-    // 1단계: 추론만 수행 (Heavy)
+    // 1단계: 추론만 수행
     public void RunInference(byte[] imageBytes)
     {
-        using var src = Image.Load<Rgba32>(imageBytes);
+        using var src = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         _lastOrigW = src.Width;
         _lastOrigH = src.Height;
 
-        // TensorHelper 사용 (리사이즈 + 정규화 통합 처리)
+        // TensorHelper 사용
         var inputTensor = src.ToTensor(ModelSize, ModelSize);
 
         var inputs = new List<NamedOnnxValue>
@@ -60,11 +55,10 @@ public class DepthEstimator : IDisposable
         using var results = _session.Run(inputs);
         var outputRaw = results.First().AsTensor<float>();
 
-        // 결과를 캐시 변수에 깊은 복사(ToDenseTensor)로 저장
         _lastOutputTensor = outputRaw.ToDenseTensor();
     }
 
-    // 2단계: 저장된 결과로 스타일만 적용 (Light)
+    // 2단계: 저장된 결과로 스타일만 적용
     public byte[] GetDepthMap(ColormapStyle style)
     {
         if (_lastOutputTensor == null)
@@ -74,14 +68,13 @@ public class DepthEstimator : IDisposable
         using var outputImg = TensorToColorMap(_lastOutputTensor, ModelSize, ModelSize, style);
 
         // 원본 크기 복원
-        outputImg.Mutate(ctx => ctx.Resize(_lastOrigW, _lastOrigH));
-
-        using var ms = new MemoryStream();
-        outputImg.SaveAsPng(ms);
-        return ms.ToArray();
+        // Skia의 Resize는 새 객체를 반환하므로 outputImg를 리사이즈한 결과를 저장
+        using var resizedImg = outputImg.Resize(new SKImageInfo(_lastOrigW, _lastOrigH), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        using var data = resizedImg.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
-    private Image<Rgba32> TensorToColorMap(Tensor<float> tensor, int w, int h, ColormapStyle style)
+    private SKBitmap TensorToColorMap(Tensor<float> tensor, int w, int h, ColormapStyle style)
     {
         float min = float.MaxValue;
         float max = float.MinValue;
@@ -95,20 +88,26 @@ public class DepthEstimator : IDisposable
         float range = max - min;
         if (range < 0.00001f) range = 1f;
 
-        var img = new Image<Rgba32>(w, h);
-        img.ProcessPixelRows(accessor =>
+        var img = new SKBitmap(w, h, SKColorType.Rgba8888, SKAlphaType.Premul);
+        Span<byte> pixels = img.GetPixelSpan();
+        int bytesPerPixel = img.BytesPerPixel;
+
+        for (int y = 0; y < h; y++)
         {
-            for (int y = 0; y < h; y++)
+            int rowOffset = y * img.RowBytes;
+            for (int x = 0; x < w; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
-                {
-                    float val = tensor[0, y, x];
-                    float norm = (val - min) / range;
-                    row[x] = ColorMapper.GetColor(norm, style);
-                }
+                float val = tensor[0, y, x];
+                float norm = (val - min) / range;
+                SKColor color = ColorMapper.GetColor(norm, style);
+
+                int offset = rowOffset + (x * bytesPerPixel);
+                pixels[offset] = color.Red;
+                pixels[offset + 1] = color.Green;
+                pixels[offset + 2] = color.Blue;
+                pixels[offset + 3] = 255;
             }
-        });
+        }
 
         return img;
     }

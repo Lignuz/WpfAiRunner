@@ -1,9 +1,8 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using OnnxEngines.Utils;
+using System.Runtime.InteropServices;
 
 namespace OnnxEngines.Colorization;
 
@@ -27,43 +26,44 @@ public class ColorizationEngine : IDisposable
     {
         if (_session == null) throw new InvalidOperationException("Model not loaded.");
 
-        // 원본 이미지 로드
-        using var originalImage = Image.Load<Rgba32>(imageBytes);
+        // 원본 이미지 로드 (Rgba8888 포맷 강제)
+        using var originalImage = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         int origW = originalImage.Width;
         int origH = originalImage.Height;
 
         // ---------------------------------------------------------
-        // 단계 1: 모델 입력 준비 (512x512, Lab의 L채널 기반 회색조)
+        // 단계 1: 모델 입력 준비 (512x512)
         // ---------------------------------------------------------
-        using var inputImage = originalImage.Clone(x => x.Resize(ModelInputSize, ModelInputSize));
+        using var inputImage = originalImage.Resize(new SKImageInfo(ModelInputSize, ModelInputSize), new SKSamplingOptions(SKCubicResampler.Mitchell));
 
         var inputTensor = new DenseTensor<float>(new[] { 1, 3, ModelInputSize, ModelInputSize });
 
-        inputImage.ProcessPixelRows(accessor =>
+        // 픽셀 데이터 접근
+        ReadOnlySpan<byte> inputPixels = inputImage.GetPixelSpan();
+        int inputBytesPerPixel = inputImage.BytesPerPixel;
+
+        for (int y = 0; y < ModelInputSize; y++)
         {
-            for (int y = 0; y < accessor.Height; y++)
+            int rowOffset = y * inputImage.RowBytes;
+            for (int x = 0; x < ModelInputSize; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < accessor.Width; x++)
-                {
-                    float r = row[x].R / 255.0f;
-                    float g = row[x].G / 255.0f;
-                    float b = row[x].B / 255.0f;
+                int pIdx = rowOffset + (x * inputBytesPerPixel);
 
-                    // RGB -> Lab 변환 후 L 채널만 추출
-                    RgbToLab(r, g, b, out float L, out _, out _);
+                float r = inputPixels[pIdx] / 255.0f;
+                float g = inputPixels[pIdx + 1] / 255.0f;
+                float b = inputPixels[pIdx + 2] / 255.0f;
 
-                    // L 채널만 있는(a=0, b=0) 회색조 RGB로 다시 변환
-                    // DDColor는 이렇게 '순수한 밝기'만 남긴 RGB 입력을 기대합니다.
-                    LabToRgb(L, 0f, 0f, out float grayR, out float grayG, out float grayB);
+                // RGB -> Lab 변환 후 L 채널만 추출
+                RgbToLab(r, g, b, out float L, out _, out _);
 
-                    // 정규화 없이 0.0 ~ 1.0 값 그대로 입력
-                    inputTensor[0, 0, y, x] = grayR;
-                    inputTensor[0, 1, y, x] = grayG;
-                    inputTensor[0, 2, y, x] = grayB;
-                }
+                // L 채널만 있는 회색조 RGB로 변환
+                LabToRgb(L, 0f, 0f, out float grayR, out float grayG, out float grayB);
+
+                inputTensor[0, 0, y, x] = grayR;
+                inputTensor[0, 1, y, x] = grayG;
+                inputTensor[0, 2, y, x] = grayB;
             }
-        });
+        }
 
         // ---------------------------------------------------------
         // 단계 2: 추론 (Inference)
@@ -72,68 +72,67 @@ public class ColorizationEngine : IDisposable
         using var results = _session.Run(inputs);
         var outputTensor = results.First().AsTensor<float>();
 
-        // 출력 레이아웃 확인 (NCHW vs NHWC)
         bool isNchw = outputTensor.Dimensions[1] == 2;
 
         // ---------------------------------------------------------
         // 단계 3: 결과 합성 (블렌딩 & 원본 해상도 복원)
         // ---------------------------------------------------------
-        using var outputImage = new Image<Rgba32>(origW, origH);
+        using var outputImage = new SKBitmap(origW, origH, SKColorType.Rgba8888, SKAlphaType.Premul);
 
-        // 원본과 출력 이미지를 동시에 순회
-        outputImage.ProcessPixelRows(originalImage, (targetAccessor, sourceAccessor) =>
+        ReadOnlySpan<byte> srcPixels = originalImage.GetPixelSpan();
+        // 쓰기 가능한 Span 가져오기 (IntPtr을 통해 unsafe 접근 하거나 GetPixelSpan 사용)
+        // SKBitmap.GetPixelSpan()은 8.0 이상에서 Span<byte>를 반환하여 쓰기가 가능합니다.
+        Span<byte> dstPixels = outputImage.GetPixelSpan();
+
+        int srcBytesPerPixel = originalImage.BytesPerPixel;
+        int dstBytesPerPixel = outputImage.BytesPerPixel;
+
+        for (int y = 0; y < origH; y++)
         {
-            for (int y = 0; y < targetAccessor.Height; y++)
+            int srcRowOff = y * originalImage.RowBytes;
+            int dstRowOff = y * outputImage.RowBytes;
+
+            for (int x = 0; x < origW; x++)
             {
-                var targetRow = targetAccessor.GetRowSpan(y);
-                var sourceRow = sourceAccessor.GetRowSpan(y);
+                // (A) 원본 픽셀에서 L(밝기) 추출
+                int srcIdx = srcRowOff + (x * srcBytesPerPixel);
+                float r = srcPixels[srcIdx] / 255.0f;
+                float g = srcPixels[srcIdx + 1] / 255.0f;
+                float b = srcPixels[srcIdx + 2] / 255.0f;
 
-                for (int x = 0; x < targetAccessor.Width; x++)
+                RgbToLab(r, g, b, out float origL, out _, out _);
+
+                // (B) 모델 출력에서 a, b 추출
+                int modelX = (int)((float)x / origW * ModelInputSize);
+                int modelY = (int)((float)y / origH * ModelInputSize);
+                modelX = Math.Clamp(modelX, 0, ModelInputSize - 1);
+                modelY = Math.Clamp(modelY, 0, ModelInputSize - 1);
+
+                float predA, predB;
+                if (isNchw)
                 {
-                    // (A) 원본 픽셀에서 L(밝기) 추출 - 화질 보존
-                    Rgba32 pixel = sourceRow[x];
-                    float r = pixel.R / 255.0f;
-                    float g = pixel.G / 255.0f;
-                    float b = pixel.B / 255.0f;
-
-                    RgbToLab(r, g, b, out float origL, out _, out _);
-
-                    // (B) 모델 출력에서 a, b(색상) 추출 (좌표 매핑)
-                    // 원본 좌표(x,y)를 모델 좌표(512,512)로 변환
-                    int modelX = (int)((float)x / origW * ModelInputSize);
-                    int modelY = (int)((float)y / origH * ModelInputSize);
-                    modelX = Math.Clamp(modelX, 0, ModelInputSize - 1);
-                    modelY = Math.Clamp(modelY, 0, ModelInputSize - 1);
-
-                    float predA, predB;
-                    if (isNchw)
-                    {
-                        predA = outputTensor[0, 0, modelY, modelX];
-                        predB = outputTensor[0, 1, modelY, modelX];
-                    }
-                    else
-                    {
-                        predA = outputTensor[0, modelY, modelX, 0];
-                        predB = outputTensor[0, modelY, modelX, 1];
-                    }
-
-                    // (C) Lab -> RGB 변환 및 저장
-                    // 모델 출력 그대로 사용 (ColorScale 제거 권장사항 반영)
-                    // 만약 색이 너무 연하면 predA * 1.2f 정도로 살짝만 키우세요.
-                    LabToRgb(origL, predA, predB, out float outR, out float outG, out float outB);
-
-                    targetRow[x] = new Rgba32(
-                        (byte)Math.Clamp(outR * 255f, 0, 255),
-                        (byte)Math.Clamp(outG * 255f, 0, 255),
-                        (byte)Math.Clamp(outB * 255f, 0, 255)
-                    );
+                    predA = outputTensor[0, 0, modelY, modelX];
+                    predB = outputTensor[0, 1, modelY, modelX];
                 }
-            }
-        });
+                else
+                {
+                    predA = outputTensor[0, modelY, modelX, 0];
+                    predB = outputTensor[0, modelY, modelX, 1];
+                }
 
-        using var ms = new MemoryStream();
-        outputImage.SaveAsPng(ms);
-        return ms.ToArray();
+                // (C) Lab -> RGB 변환
+                LabToRgb(origL, predA, predB, out float outR, out float outG, out float outB);
+
+                int dstIdx = dstRowOff + (x * dstBytesPerPixel);
+                dstPixels[dstIdx] = (byte)Math.Clamp(outR * 255f, 0, 255);     // R
+                dstPixels[dstIdx + 1] = (byte)Math.Clamp(outG * 255f, 0, 255); // G
+                dstPixels[dstIdx + 2] = (byte)Math.Clamp(outB * 255f, 0, 255); // B
+                dstPixels[dstIdx + 3] = 255; // A
+            }
+        }
+
+        using var data = outputImage.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
     }
 
     public void Dispose() => _session?.Dispose();

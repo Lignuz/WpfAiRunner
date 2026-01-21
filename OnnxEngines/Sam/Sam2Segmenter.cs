@@ -1,14 +1,11 @@
 ﻿using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using OnnxEngines.Utils;
 using SamEngine;
 
 namespace OnnxEngines.Sam;
 
-// ISamSegmenter 인터페이스 구현
 public class Sam2Segmenter : ISamSegmenter
 {
     private InferenceSession? _encoderSession;
@@ -27,7 +24,6 @@ public class Sam2Segmenter : ISamSegmenter
 
     public void LoadModels(string encoderPath, string decoderPath, bool useGpu)
     {
-        // OnnxHelper 사용
         (_encoderSession, DeviceMode) = OnnxHelper.LoadSession(encoderPath, useGpu);
         (_decoderSession, _) = OnnxHelper.LoadSession(decoderPath, useGpu);
     }
@@ -36,7 +32,7 @@ public class Sam2Segmenter : ISamSegmenter
     {
         if (_encoderSession == null) throw new InvalidOperationException("Encoder not loaded.");
 
-        using var image = Image.Load<Rgba32>(imageBytes);
+        using var image = SKBitmap.Decode(imageBytes).Copy(SKColorType.Rgba8888);
         _orgW = image.Width;
         _orgH = image.Height;
 
@@ -44,10 +40,16 @@ public class Sam2Segmenter : ISamSegmenter
         _resizedW = (int)(_orgW * scale);
         _resizedH = (int)(_orgH * scale);
 
-        image.Mutate(x => x.Resize(_resizedW, _resizedH));
-        using var paddedImage = new Image<Rgba32>(TargetSize, TargetSize);
-        paddedImage.Mutate(x => x.BackgroundColor(Color.Black));
-        paddedImage.Mutate(x => x.DrawImage(image, new Point(0, 0), 1f));
+        // 1. 리사이즈
+        using var resizedImage = image.Resize(new SKImageInfo(_resizedW, _resizedH), new SKSamplingOptions(SKCubicResampler.Mitchell));
+
+        // 2. 패딩 (Black Background)
+        using var paddedImage = new SKBitmap(TargetSize, TargetSize, SKColorType.Rgba8888, SKAlphaType.Premul);
+        using (var canvas = new SKCanvas(paddedImage))
+        {
+            canvas.Clear(SKColors.Black);
+            canvas.DrawBitmap(resizedImage, 0, 0);
+        }
 
         // TensorHelper 사용 (Mean/Std 포함)
         var inputTensor = paddedImage.ToTensor(TargetSize, TargetSize, _mean, _std);
@@ -120,28 +122,40 @@ public class Sam2Segmenter : ISamSegmenter
     private byte[] MaskTensorToPng(Tensor<float> maskTensor, int maskIndex)
     {
         int h = 256, w = 256;
-        using var rawMask = new Image<L8>(w, h);
-        rawMask.ProcessPixelRows(accessor =>
+        // Gray8 포맷 사용 (1채널)
+        using var rawMask = new SKBitmap(w, h, SKColorType.Gray8, SKAlphaType.Opaque);
+        Span<byte> pixels = rawMask.GetPixelSpan();
+
+        for (int y = 0; y < h; y++)
         {
-            for (int y = 0; y < h; y++)
+            int rowOff = y * rawMask.RowBytes;
+            for (int x = 0; x < w; x++)
             {
-                var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < w; x++)
-                {
-                    float v = maskTensor[0, maskIndex, y, x];
-                    float probability = 1.0f / (1.0f + MathF.Exp(-v));
-                    row[x] = new L8((byte)(probability * 255));
-                }
+                float v = maskTensor[0, maskIndex, y, x];
+                float probability = 1.0f / (1.0f + MathF.Exp(-v));
+                pixels[rowOff + x] = (byte)(probability * 255);
             }
-        });
+        }
+
+        // 유효 영역 계산 및 크롭
         double ratioW = (double)_resizedW / TargetSize;
         double ratioH = (double)_resizedH / TargetSize;
-        int validW = (int)(w * ratioW); int validH = (int)(h * ratioH);
-        validW = Math.Clamp(validW, 1, w); validH = Math.Clamp(validH, 1, h);
-        rawMask.Mutate(x => x.Crop(new Rectangle(0, 0, validW, validH)));
-        rawMask.Mutate(x => x.Resize(new ResizeOptions { Size = new Size(_orgW, _orgH), Mode = ResizeMode.Stretch, Sampler = KnownResamplers.Bicubic }));
+        int validW = (int)(w * ratioW);
+        int validH = (int)(h * ratioH);
+        validW = Math.Clamp(validW, 1, w);
+        validH = Math.Clamp(validH, 1, h);
+
+        using var croppedMask = new SKBitmap(validW, validH);
+        // ExtractSubset은 픽셀 메모리를 공유하거나 복사본을 생성할 수 있음. 
+        // Resize 전에 새로운 비트맵 객체가 필요하므로 ExtractSubset 사용.
+        rawMask.ExtractSubset(croppedMask, SKRectI.Create(0, 0, validW, validH));
+
+        // 최종 원본 크기로 리사이즈
+        using var finalMask = croppedMask.Resize(new SKImageInfo(_orgW, _orgH), new SKSamplingOptions(SKCubicResampler.Mitchell));
+
         using var ms = new MemoryStream();
-        rawMask.SaveAsPng(ms);
+        using var data = finalMask.Encode(SKEncodedImageFormat.Png, 100);
+        data.SaveTo(ms);
         return ms.ToArray();
     }
 
