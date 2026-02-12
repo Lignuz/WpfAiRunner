@@ -36,6 +36,7 @@ public partial class MainWindow : Window
                 "Anime" => new Views.AnimeGanView(),
                 "Color" => new Views.ColorizationView(),
                 "StableDiffusion" => new Views.SdView(),
+                "OCR" => new Views.OcrView(),
                 _ => new Views.WelcomeView()
             };
         }
